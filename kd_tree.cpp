@@ -89,9 +89,9 @@ private:
         return node;
     }
 
-    SlotPayload<K>* get_slot_ptr(PagedNode<K>* node, uint64_t index_in_node, bool allocate_on_demand) {
-        uint64_t page_idx = index_in_node / SLOTS_PER_PAGE;
-        uint64_t slot_idx = index_in_node % SLOTS_PER_PAGE;
+    inline SlotPayload<K>* get_slot_ptr(PagedNode<K>* node, uint64_t index_in_node, bool allocate_on_demand) {
+        uint64_t page_idx = index_in_node >> 8;
+        uint64_t slot_idx = index_in_node & 255;
         if (node->pages[page_idx] == nullptr) {
             if (allocate_on_demand) {
                 node->pages[page_idx] = static_cast<Page<K>*>(mem.alloc(sizeof(Page<K>)));
@@ -134,6 +134,7 @@ public:
             }
             if (slot.value & POINTER_TAG) {
                 current_node_offset = slot.value & OFFSET_MASK;
+                __builtin_prefetch(mem.get_ptr(current_node_offset));
                 continue;
             }
 

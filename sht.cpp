@@ -9,6 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <iomanip>
+#include <string>
 
 // --- Constants for the data structure ---
 const uint64_t POINTER_TAG = 1ULL << 63;
@@ -157,6 +158,7 @@ public:
     std::vector<uint64_t> scan(uint64_t start, uint64_t end) {
         std::vector<uint64_t> results;
         if (start > end) return results;
+        results.reserve(1024); // Avoid reallocations for typical scan sizes
         scan_recursive(root_node_offset, 0, 0, start, end, results);
         return results;
     }
@@ -199,74 +201,109 @@ private:
     }
 };
 
+void run_benchmark(size_t num_keys, const std::string& key_type) {
+    // Adjust memory based on key count. Allocate 40 bytes per key as a safe upper bound for this structure.
+    const size_t MEM_SIZE = num_keys * 40;
+    LayeredSlotMap sht(MEM_SIZE);
+
+    std::cout << "\n\n--- Layered Slot Map (SHT) Benchmark ---" << std::endl;
+    std::cout << "--- Configuration: " << num_keys << " keys, " << key_type << " distribution ---" << std::endl;
+
+    std::cout << "Preparing keys..." << std::endl;
+    std::vector<uint64_t> keys(num_keys);
+    std::iota(keys.begin(), keys.end(), 1);
+
+    std::mt19937_64 rng(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    if (key_type == "Random") {
+        std::shuffle(keys.begin(), keys.end(), rng);
+    }
+
+    // --- Insert Benchmark ---
+    std::cout << "\n--- Inserting " << num_keys << " keys ---" << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+    for (uint64_t key : keys) {
+        sht.insert(key);
+    }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    double ns_per_insert = (double)duration.count() / num_keys;
+    std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
+    std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_insert << " ns/insert" << std::endl;
+
+    // --- Get Benchmark ---
+    std::cout << "\n--- Looking up " << num_keys << " existing keys ---" << std::endl;
+    if (key_type == "Random") {
+        std::shuffle(keys.begin(), keys.end(), rng);
+    }
+    size_t found_count = 0;
+    start_time = std::chrono::high_resolution_clock::now();
+    for (uint64_t key : keys) {
+        if (sht.get(key)) {
+            found_count++;
+        }
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    double ns_per_get = (double)duration.count() / num_keys;
+    std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
+    std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_get << " ns/get" << std::endl;
+    std::cout << "Verification: " << found_count << " of " << num_keys << " keys found." << std::endl;
+    if (found_count != num_keys) {
+        std::cerr << "ERROR: Not all inserted keys were found!" << std::endl;
+    }
+
+    // --- Scan Benchmark ---
+    const size_t SCAN_SIZE = 1000;
+    if (num_keys > SCAN_SIZE) {
+        std::uniform_int_distribution<uint64_t> dist(1, num_keys - SCAN_SIZE);
+        uint64_t scan_start = dist(rng);
+        uint64_t scan_end = scan_start + SCAN_SIZE - 1;
+
+        std::cout << "\n--- Benchmarking Range Scan (1000 keys) ---" << std::endl;
+
+        start_time = std::chrono::high_resolution_clock::now();
+        std::vector<uint64_t> scan_results = sht.scan(scan_start, scan_end);
+        end_time = std::chrono::high_resolution_clock::now();
+
+        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+        double ns_per_scan_key = scan_results.empty() ? 0 : (double)duration.count() / scan_results.size();
+
+        std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
+        std::cout << "Verification: Found " << scan_results.size() << " keys." << std::endl;
+        std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_scan_key << " ns/key" << std::endl;
+
+        if (scan_results.size() != SCAN_SIZE) {
+            std::cerr << "ERROR: Scan did not return the expected number of keys (" << SCAN_SIZE << ")" << std::endl;
+        }
+    }
+
+
+    // --- Memory Usage ---
+    std::cout << "\n--- Memory Usage ---" << std::endl;
+    size_t mem_used = sht.get_mem_usage();
+    std::cout << "Total memory allocated for nodes: " << mem_used / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "Memory per key: " << (double)mem_used / num_keys << " bytes/key" << std::endl;
+    std::cout << "----------------------------------------------------------" << std::endl;
+}
 
 int main() {
     try {
-        const size_t NUM_KEYS = 1000000;
-        // Correctly define 2GB using 64-bit unsigned literal
-        const size_t MEM_SIZE = 2ULL * 1024 * 1024 * 1024;
-        LayeredSlotMap sht(MEM_SIZE);
+        const size_t ONE_MILLION = 1000000;
+        const size_t TEN_MILLION = 10000000;
+        const size_t TWENTY_MILLION = 20000000;
 
-        std::cout << "--- Layered Slot Map (SHT) Benchmark ---" << std::endl;
-        std::cout << "Preparing " << NUM_KEYS << " random keys..." << std::endl;
+        run_benchmark(ONE_MILLION, "Random");
+        run_benchmark(ONE_MILLION, "Sequential");
 
-        std::vector<uint64_t> keys(NUM_KEYS);
-        std::iota(keys.begin(), keys.end(), 1); // Fill with 1, 2, 3...
-        std::mt19937_64 rng(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-        std::shuffle(keys.begin(), keys.end(), rng);
+        run_benchmark(TEN_MILLION, "Random");
+        run_benchmark(TEN_MILLION, "Sequential");
 
-        // --- Insert Benchmark ---
-        std::cout << "\n--- Inserting " << NUM_KEYS << " keys ---" << std::endl;
-        auto start_time = std::chrono::high_resolution_clock::now();
-        for (uint64_t key : keys) {
-            sht.insert(key);
-        }
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        double ns_per_insert = (double)duration.count() / NUM_KEYS;
-        std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
-        std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_insert << " ns/insert" << std::endl;
-
-        // --- Get Benchmark ---
-        std::cout << "\n--- Looking up " << NUM_KEYS << " existing keys ---" << std::endl;
-        std::shuffle(keys.begin(), keys.end(), rng);
-        size_t found_count = 0;
-        start_time = std::chrono::high_resolution_clock::now();
-        for (uint64_t key : keys) {
-            if (sht.get(key)) {
-                found_count++;
-            }
-        }
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        double ns_per_get = (double)duration.count() / NUM_KEYS;
-        std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
-        std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_get << " ns/get" << std::endl;
-        std::cout << "Verification: " << found_count << " of " << NUM_KEYS << " keys found." << std::endl;
-        if (found_count != NUM_KEYS) {
-            std::cerr << "ERROR: Not all inserted keys were found!" << std::endl;
-        }
-
-        // --- Scan Demonstration ---
-        std::cout << "\n--- Demonstrating Range Scan [42000, 42020] ---" << std::endl;
-        std::vector<uint64_t> scan_results = sht.scan(42000, 42020);
-        std::cout << "Found " << scan_results.size() << " keys in range (output is already sorted by scan):" << std::endl;
-        for (uint64_t key : scan_results) {
-            std::cout << key << " ";
-        }
-        std::cout << std::endl;
-        std::cout << "--------------------------------------------" << std::endl;
-
-        // --- Memory Usage ---
-        std::cout << "\n--- Memory Usage ---" << std::endl;
-        size_t mem_used = sht.get_mem_usage();
-        std::cout << "Total memory allocated for nodes: " << mem_used / (1024.0 * 1024.0) << " MB" << std::endl;
-        std::cout << "Memory per key: " << (double)mem_used / NUM_KEYS << " bytes/key" << std::endl;
+        run_benchmark(TWENTY_MILLION, "Random");
+        run_benchmark(TWENTY_MILLION, "Sequential");
 
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "An error occurred: " << e.what() << std::endl;
         return 1;
     }
-
     return 0;
 }

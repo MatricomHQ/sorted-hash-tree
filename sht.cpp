@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <iomanip>
 #include <string>
+#include <unordered_map>
 
 // --- Constants for the data structure ---
 const uint64_t POINTER_TAG = 1ULL << 63;
@@ -202,11 +203,9 @@ private:
 };
 
 void run_benchmark(size_t num_keys, const std::string& key_type) {
-    // Adjust memory based on key count. Allocate 40 bytes per key as a safe upper bound for this structure.
-    const size_t MEM_SIZE = num_keys * 40;
-    LayeredSlotMap sht(MEM_SIZE);
+    const size_t SHT_MEM_SIZE = num_keys * 40;
 
-    std::cout << "\n\n--- Layered Slot Map (SHT) Benchmark ---" << std::endl;
+    std::cout << "\n\n--- Benchmark Run ---" << std::endl;
     std::cout << "--- Configuration: " << num_keys << " keys, " << key_type << " distribution ---" << std::endl;
 
     std::cout << "Preparing keys..." << std::endl;
@@ -219,22 +218,37 @@ void run_benchmark(size_t num_keys, const std::string& key_type) {
     }
 
     // --- Insert Benchmark ---
-    std::cout << "\n--- Inserting " << num_keys << " keys ---" << std::endl;
+    std::cout << "\n--- INSERTION ---" << std::endl;
+    // LayeredSlotMap
+    LayeredSlotMap sht(SHT_MEM_SIZE);
     auto start_time = std::chrono::high_resolution_clock::now();
     for (uint64_t key : keys) {
         sht.insert(key);
     }
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_insert = (double)duration.count() / num_keys;
-    std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
-    std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_insert << " ns/insert" << std::endl;
+    double ns_per_insert_sht = (double)duration.count() / num_keys;
+    std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_insert_sht << " ns/insert" << std::endl;
+
+    // std::unordered_map
+    std::unordered_map<uint64_t, bool> umap;
+    umap.reserve(num_keys);
+    start_time = std::chrono::high_resolution_clock::now();
+    for (uint64_t key : keys) {
+        umap.insert({key, true});
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    double ns_per_insert_umap = (double)duration.count() / num_keys;
+    std::cout << "[std::unordered_map]  Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_insert_umap << " ns/insert" << std::endl;
+
 
     // --- Get Benchmark ---
-    std::cout << "\n--- Looking up " << num_keys << " existing keys ---" << std::endl;
+    std::cout << "\n--- LOOKUP ---" << std::endl;
     if (key_type == "Random") {
         std::shuffle(keys.begin(), keys.end(), rng);
     }
+    // LayeredSlotMap
     size_t found_count = 0;
     start_time = std::chrono::high_resolution_clock::now();
     for (uint64_t key : keys) {
@@ -244,13 +258,24 @@ void run_benchmark(size_t num_keys, const std::string& key_type) {
     }
     end_time = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_get = (double)duration.count() / num_keys;
-    std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
-    std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_get << " ns/get" << std::endl;
-    std::cout << "Verification: " << found_count << " of " << num_keys << " keys found." << std::endl;
-    if (found_count != num_keys) {
-        std::cerr << "ERROR: Not all inserted keys were found!" << std::endl;
+    double ns_per_get_sht = (double)duration.count() / num_keys;
+    std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_get_sht << " ns/get" << std::endl;
+    if (found_count != num_keys) std::cerr << "SHT GET VERIFICATION FAILED!" << std::endl;
+
+    // std::unordered_map
+    found_count = 0;
+    start_time = std::chrono::high_resolution_clock::now();
+    for (uint64_t key : keys) {
+        if (umap.find(key) != umap.end()) {
+            found_count++;
+        }
     }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    double ns_per_get_umap = (double)duration.count() / num_keys;
+    std::cout << "[std::unordered_map]  Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_get_umap << " ns/get" << std::endl;
+    if (found_count != num_keys) std::cerr << "UMAP GET VERIFICATION FAILED!" << std::endl;
+
 
     // --- Scan Benchmark ---
     const size_t SCAN_SIZE = 1000;
@@ -259,30 +284,32 @@ void run_benchmark(size_t num_keys, const std::string& key_type) {
         uint64_t scan_start = dist(rng);
         uint64_t scan_end = scan_start + SCAN_SIZE - 1;
 
-        std::cout << "\n--- Benchmarking Range Scan (1000 keys) ---" << std::endl;
+        std::cout << "\n--- RANGE SCAN ---" << std::endl;
+        std::cout << "(std::unordered_map does not support this operation)" << std::endl;
 
         start_time = std::chrono::high_resolution_clock::now();
         std::vector<uint64_t> scan_results = sht.scan(scan_start, scan_end);
         end_time = std::chrono::high_resolution_clock::now();
-
         duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
         double ns_per_scan_key = scan_results.empty() ? 0 : (double)duration.count() / scan_results.size();
 
-        std::cout << "Total time: " << duration.count() / 1e6 << " ms" << std::endl;
-        std::cout << "Verification: Found " << scan_results.size() << " keys." << std::endl;
-        std::cout << "Average latency: " << std::fixed << std::setprecision(2) << ns_per_scan_key << " ns/key" << std::endl;
-
-        if (scan_results.size() != SCAN_SIZE) {
-            std::cerr << "ERROR: Scan did not return the expected number of keys (" << SCAN_SIZE << ")" << std::endl;
-        }
+        std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_scan_key << " ns/key (for a scan of " << scan_results.size() << " keys)" << std::endl;
+        if (scan_results.size() != SCAN_SIZE) std::cerr << "SHT SCAN VERIFICATION FAILED!" << std::endl;
     }
 
+    // --- MEMORY USAGE ---
+    std::cout << "\n--- MEMORY USAGE ---" << std::endl;
+    // LayeredSlotMap
+    size_t mem_used_sht = sht.get_mem_usage();
+    std::cout << "[LayeredSlotMap]      Total (Actual):    " << mem_used_sht / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "[LayeredSlotMap]      Per Key (Actual):  " << (double)mem_used_sht / num_keys << " bytes/key" << std::endl;
 
-    // --- Memory Usage ---
-    std::cout << "\n--- Memory Usage ---" << std::endl;
-    size_t mem_used = sht.get_mem_usage();
-    std::cout << "Total memory allocated for nodes: " << mem_used / (1024.0 * 1024.0) << " MB" << std::endl;
-    std::cout << "Memory per key: " << (double)mem_used / num_keys << " bytes/key" << std::endl;
+    // std::unordered_map (Estimation)
+    // Formula: (nodes * (key + val + next_ptr)) + (buckets * ptr_size)
+    size_t node_size = sizeof(uint64_t) + sizeof(bool) + sizeof(void*); // Assumes typical node structure
+    size_t mem_used_umap = (umap.size() * node_size) + (umap.bucket_count() * sizeof(void*));
+    std::cout << "[std::unordered_map]  Total (Estimated): " << mem_used_umap / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "[std::unordered_map]  Per Key (Estimated): " << (double)mem_used_umap / num_keys << " bytes/key" << std::endl;
     std::cout << "----------------------------------------------------------" << std::endl;
 }
 

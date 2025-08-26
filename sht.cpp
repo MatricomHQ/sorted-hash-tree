@@ -15,7 +15,7 @@
 // --- Constants for the data structure ---
 const uint64_t POINTER_TAG = 1ULL << 63;
 const uint64_t OFFSET_MASK = ~(POINTER_TAG);
-const unsigned int BITS_PER_LEVEL = 3;
+const unsigned int BITS_PER_LEVEL = 16;
 const unsigned int NODE_SLOTS = 1 << BITS_PER_LEVEL;
 const uint64_t LEVEL_INDEX_MASK = NODE_SLOTS - 1;
 const unsigned int MAX_DEPTH = (63 + BITS_PER_LEVEL - 1) / BITS_PER_LEVEL;
@@ -96,7 +96,7 @@ public:
         uint64_t current_node_offset = root_node_offset;
         for (unsigned int depth = 0; depth < MAX_DEPTH; ++depth) {
             Node* current_node = static_cast<Node*>(mem.get_ptr(current_node_offset));
-            int shift = 63 - (depth + 1) * BITS_PER_LEVEL;
+            int shift = 64 - (depth + 1) * BITS_PER_LEVEL;
             uint64_t index = (key >> shift) & LEVEL_INDEX_MASK;
 
             uint64_t& slot = current_node->slots[index];
@@ -119,7 +119,7 @@ public:
             unsigned int next_depth = depth + 1;
 
             while (next_depth < MAX_DEPTH) {
-                int next_shift = 63 - (next_depth + 1) * BITS_PER_LEVEL;
+                int next_shift = 64 - (next_depth + 1) * BITS_PER_LEVEL;
                 uint64_t index_existing = (existing_key >> next_shift) & LEVEL_INDEX_MASK;
                 uint64_t index_new = (key >> next_shift) & LEVEL_INDEX_MASK;
 
@@ -142,7 +142,7 @@ public:
         uint64_t current_node_offset = root_node_offset;
         for (unsigned int depth = 0; depth < MAX_DEPTH; ++depth) {
             Node* current_node = static_cast<Node*>(mem.get_ptr(current_node_offset));
-            int shift = 63 - (depth + 1) * BITS_PER_LEVEL;
+            int shift = 64 - (depth + 1) * BITS_PER_LEVEL;
             uint64_t index = (key >> shift) & LEVEL_INDEX_MASK;
             uint64_t slot = current_node->slots[index];
 
@@ -172,26 +172,55 @@ private:
     MemoryManager mem;
     uint64_t root_node_offset;
 
-    void scan_recursive(uint64_t node_offset, int depth, uint64_t prefix, uint64_t start, uint64_t end, std::vector<uint64_t>& results) {
+    void dump_all(uint64_t node_offset, int depth, std::vector<uint64_t>& results) {
         if (depth >= MAX_DEPTH) return;
         Node* node = static_cast<Node*>(mem.get_ptr(node_offset));
-        int shift = 63 - (depth + 1) * BITS_PER_LEVEL;
-
         for (int i = 0; i < NODE_SLOTS; ++i) {
             uint64_t slot = node->slots[i];
             if (slot == 0) continue;
-
-            uint64_t child_prefix = prefix | ((uint64_t)i << shift);
-            uint64_t lower_bound = child_prefix;
-            uint64_t upper_bound_mask = (shift < 63) ? (1ULL << shift) - 1 : UINT64_MAX;
-            uint64_t upper_bound = child_prefix | upper_bound_mask;
-
-            if (lower_bound > end || upper_bound < start) {
-                continue; // Prune this entire branch
+            if (slot & POINTER_TAG) {
+                dump_all(slot & OFFSET_MASK, depth + 1, results);
+            } else {
+                results.push_back(slot);
             }
+        }
+    }
+
+    void scan_recursive(uint64_t node_offset, int depth, uint64_t prefix, uint64_t start, uint64_t end, std::vector<uint64_t>& results) {
+        if (depth >= MAX_DEPTH) return;
+        Node* node = static_cast<Node*>(mem.get_ptr(node_offset));
+
+        int shift = 64 - (depth + 1) * BITS_PER_LEVEL;
+
+        // Calculate Node Bounds
+        int bits_in_subtree = 64 - depth * BITS_PER_LEVEL;
+        if (bits_in_subtree < 0) bits_in_subtree = 0;
+        uint64_t node_upper_bound = prefix | ((bits_in_subtree < 64) ? (1ULL << bits_in_subtree) - 1 : UINT64_MAX);
+
+        // Determine Scan Intersection
+        uint64_t effective_start = std::max(start, prefix);
+        uint64_t effective_end = std::min(end, node_upper_bound);
+
+        if (effective_start > effective_end) return;
+
+        // Calculate Slot Indices
+        uint64_t start_idx = (effective_start >> shift) & LEVEL_INDEX_MASK;
+        uint64_t end_idx = (effective_end >> shift) & LEVEL_INDEX_MASK;
+
+        // Targeted Iteration
+        for (uint64_t i = start_idx; i <= end_idx; ++i) {
+            uint64_t slot = node->slots[i];
+            if (slot == 0) continue;
+
+            uint64_t child_prefix = prefix | (i << shift);
 
             if (slot & POINTER_TAG) {
-                scan_recursive(slot & OFFSET_MASK, depth + 1, child_prefix, start, end, results);
+                // For child nodes between start and end, dump all contents.
+                if (i > start_idx && i < end_idx) {
+                    dump_all(slot & OFFSET_MASK, depth + 1, results);
+                } else { // For start and end child nodes, recurse.
+                    scan_recursive(slot & OFFSET_MASK, depth + 1, child_prefix, start, end, results);
+                }
             } else {
                 uint64_t key = slot;
                 if (key >= start && key <= end) {

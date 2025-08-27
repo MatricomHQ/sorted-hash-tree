@@ -1,361 +1,347 @@
 #include <iostream>
 #include <vector>
-#include <cstdint>
-#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <atomic>
 #include <chrono>
 #include <random>
 #include <algorithm>
+#include <thread>
+#include <memory>
+#include <stdexcept>
+#include <limits>
+#include <utility>
+#include <cstring>
+#include <iomanip>
 #include <numeric>
+#include <mutex>
+
 #include <sys/mman.h>
 #include <unistd.h>
-#include <iomanip>
-#include <string>
-#include <unordered_map>
 
-// --- Constants for the data structure ---
-const uint64_t POINTER_TAG = 1ULL << 63;
-const uint64_t OFFSET_MASK = ~(POINTER_TAG);
-const unsigned int BITS_PER_LEVEL = 16;
-const unsigned int NODE_SLOTS = 1 << BITS_PER_LEVEL;
-const uint64_t LEVEL_INDEX_MASK = NODE_SLOTS - 1;
-const unsigned int MAX_DEPTH = (63 + BITS_PER_LEVEL - 1) / BITS_PER_LEVEL;
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
+// --- Foundational Data Structures (Adapted from Stax) ---
 
-// A simple memory manager using a single mmap-ed region.
-class MemoryManager {
+class ValueStore;
+template<size_t FANOUT> struct RadixNode;
+
+struct Record {
+    uint32_t value_len;
+    uint32_t dim;
+    uint64_t value_or_offset;
+    uint64_t coords[];
+
+    static constexpr uint32_t INLINE_FLAG = 1U << 31;
+    bool is_value_inlined() const { return (dim & INLINE_FLAG) != 0; }
+    void set_inlined(bool is_inlined) { dim = (dim & ~INLINE_FLAG) | (is_inlined ? INLINE_FLAG : 0); }
+    static size_t get_size(uint32_t d) { return sizeof(Record) + sizeof(uint64_t) * d; }
+};
+
+class ValueStore {
+    std::atomic<uint64_t> next_offset_;
+    uint8_t* value_pool_;
+    static constexpr uint64_t MAX_VALUE_BYTES = 1024 * 1024 * 128; // 128MB
 public:
-    explicit MemoryManager(size_t size) : allocation_size(size) {
-        base_ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (base_ptr == MAP_FAILED) {
-            throw std::runtime_error("Failed to mmap memory");
-        }
-        current_ptr = static_cast<uint8_t*>(base_ptr);
-        end_ptr = current_ptr + size;
-        allocated_bytes = 0;
+    ValueStore() : next_offset_(1) {
+        value_pool_ = (uint8_t*)mmap(nullptr, MAX_VALUE_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (value_pool_ == MAP_FAILED) throw std::runtime_error("mmap failed for value store");
     }
-
-    ~MemoryManager() {
-        if (base_ptr != MAP_FAILED) {
-            munmap(base_ptr, allocation_size);
-        }
+    ~ValueStore() { munmap(value_pool_, MAX_VALUE_BYTES); }
+    uint64_t allocate_value(const void* data, uint32_t size) {
+        size_t padded_size = (size + 7) & ~7;
+        uint64_t offset = next_offset_.fetch_add(padded_size, std::memory_order_relaxed);
+        if (offset + padded_size > MAX_VALUE_BYTES) throw std::runtime_error("Value pool exhausted");
+        memcpy(value_pool_ + offset, data, size);
+        return offset;
     }
+};
 
-    MemoryManager(const MemoryManager&) = delete;
-    MemoryManager& operator=(const MemoryManager&) = delete;
+namespace TaggedIndex {
+    static constexpr uint32_t TAG_BIT = 1U << 31;
+    static constexpr uint32_t INDEX_MASK = ~TAG_BIT;
+    inline bool is_leaf(uint32_t idx) { return (idx & TAG_BIT) != 0; }
+    inline bool is_node(uint32_t idx) { return (idx & TAG_BIT) == 0 && idx != 0; }
+    inline uint32_t get_index(uint32_t idx) { return idx & INDEX_MASK; }
+    inline uint32_t make_leaf_idx(uint32_t rec_idx) { return rec_idx | TAG_BIT; }
+    inline uint32_t make_node_idx(uint32_t node_idx) { return node_idx; }
+};
 
-    void* alloc(size_t size) {
-        size_t aligned_size = (size + 7) & ~7;
-        if (current_ptr + aligned_size > end_ptr) {
-            throw std::bad_alloc();
-        }
-        void* mem = current_ptr;
-        current_ptr += aligned_size;
-        allocated_bytes += aligned_size;
-        std::fill(static_cast<uint64_t*>(mem), static_cast<uint64_t*>(mem) + aligned_size / sizeof(uint64_t), 0);
-        return mem;
+template<size_t FANOUT>
+struct RadixNode {
+    uint32_t test_nibble_idx;
+    uint32_t representative_record_idx;
+    std::atomic<uint32_t> children[FANOUT];
+
+    RadixNode() : test_nibble_idx(0), representative_record_idx(0) {
+        for(size_t i = 0; i < FANOUT; ++i) children[i].store(0, std::memory_order_relaxed);
     }
+};
 
-    uint64_t get_offset(const void* ptr) const {
-        return static_cast<const uint8_t*>(ptr) - static_cast<uint8_t*>(base_ptr);
-    }
-
-    void* get_ptr(uint64_t offset) const {
-        return static_cast<uint8_t*>(base_ptr) + offset;
-    }
-
-    size_t get_allocated_size() const {
-        return allocated_bytes;
-    }
-
+class NodeManager {
 private:
-    void* base_ptr = nullptr;
-    uint8_t* current_ptr = nullptr;
-    uint8_t* end_ptr = nullptr;
-    size_t allocation_size = 0;
-    size_t allocated_bytes = 0;
-};
+    std::atomic<uint32_t> next_node_idx_;
+    uint8_t* node_pool_;
+    static constexpr uint32_t MAX_NODES = 32 * 1024 * 1024;
+    static constexpr size_t NODE_SIZE = sizeof(RadixNode<16>);
+    static constexpr size_t THREAD_CACHE_SIZE = 64;
+    static thread_local uint32_t node_cache_[THREAD_CACHE_SIZE];
+    static thread_local int cache_ptr_;
 
-
-// The core node structure. It's exactly 64 bytes (a cache line).
-struct Node {
-    uint64_t slots[NODE_SLOTS];
-};
-
-
-// The main data structure class.
-class LayeredSlotMap {
+    void refill_cache() {
+        uint32_t start_idx = next_node_idx_.fetch_add(THREAD_CACHE_SIZE, std::memory_order_relaxed);
+        if (start_idx + THREAD_CACHE_SIZE >= MAX_NODES) throw std::runtime_error("Node pool exhausted");
+        for (size_t i = 0; i < THREAD_CACHE_SIZE; ++i) node_cache_[i] = start_idx + i;
+        cache_ptr_ = THREAD_CACHE_SIZE - 1;
+    }
 public:
-    explicit LayeredSlotMap(size_t size) : mem(size) {
-        void* root_node_ptr = mem.alloc(sizeof(Node));
-        root_node_offset = mem.get_offset(root_node_ptr);
+    NodeManager() : next_node_idx_(1) {
+        size_t pool_size = (size_t)MAX_NODES * NODE_SIZE;
+        node_pool_ = (uint8_t*)mmap(nullptr, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (node_pool_ == MAP_FAILED) throw std::runtime_error("mmap failed for node pool");
+    }
+    ~NodeManager() { munmap(node_pool_, (size_t)MAX_NODES * NODE_SIZE); }
+    template<size_t FANOUT> RadixNode<FANOUT>* get_node(uint32_t idx) { return reinterpret_cast<RadixNode<FANOUT>*>(node_pool_ + (size_t)idx * NODE_SIZE); }
+    template<size_t FANOUT> uint32_t allocate_node() {
+        if (cache_ptr_ < 0) refill_cache();
+        uint32_t new_idx = node_cache_[cache_ptr_--];
+        new (get_node<FANOUT>(new_idx)) RadixNode<FANOUT>();
+        return new_idx;
+    }
+    size_t get_mem_usage() const { return (size_t)next_node_idx_.load() * NODE_SIZE; }
+};
+thread_local uint32_t NodeManager::node_cache_[NodeManager::THREAD_CACHE_SIZE];
+thread_local int NodeManager::cache_ptr_ = -1;
+
+class RecordManager {
+private:
+    std::atomic<uint32_t> next_record_idx_;
+    uint8_t* record_pool_;
+    ValueStore* value_store_;
+    const uint32_t dim_;
+    const size_t record_size_with_coords_;
+    static constexpr uint32_t MAX_RECORDS = 16 * 1024 * 1024;
+    static constexpr size_t THREAD_CACHE_SIZE = 64;
+    static thread_local uint32_t record_cache_[THREAD_CACHE_SIZE];
+    static thread_local int cache_ptr_;
+
+    void refill_cache() {
+        uint32_t start_idx = next_record_idx_.fetch_add(THREAD_CACHE_SIZE, std::memory_order_relaxed);
+        if (start_idx + THREAD_CACHE_SIZE >= MAX_RECORDS) throw std::runtime_error("Record pool exhausted");
+        for (size_t i = 0; i < THREAD_CACHE_SIZE; ++i) record_cache_[i] = start_idx + i;
+        cache_ptr_ = THREAD_CACHE_SIZE - 1;
+    }
+public:
+    RecordManager(ValueStore* vs, uint32_t d) : next_record_idx_(1), value_store_(vs), dim_(d), record_size_with_coords_(Record::get_size(d)) {
+        size_t pool_size = (size_t)MAX_RECORDS * record_size_with_coords_;
+        record_pool_ = (uint8_t*)mmap(nullptr, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (record_pool_ == MAP_FAILED) throw std::runtime_error("mmap failed for record pool");
+    }
+    ~RecordManager() { munmap(record_pool_, (size_t)MAX_RECORDS * record_size_with_coords_); }
+    Record* get_record(uint32_t idx) { return reinterpret_cast<Record*>(record_pool_ + (size_t)idx * record_size_with_coords_); }
+    uint32_t allocate_record(const uint64_t* coords, uint64_t value) {
+        if (cache_ptr_ < 0) refill_cache();
+        uint32_t new_idx = record_cache_[cache_ptr_--];
+        Record* rec = get_record(new_idx);
+        rec->dim = dim_;
+        rec->value_len = sizeof(value);
+        rec->value_or_offset = value;
+        rec->set_inlined(true);
+        memcpy(rec->coords, coords, sizeof(uint64_t) * dim_);
+        return new_idx;
+    }
+    size_t get_mem_usage() const { return (size_t)next_record_idx_.load() * record_size_with_coords_; }
+};
+thread_local uint32_t RecordManager::record_cache_[RecordManager::THREAD_CACHE_SIZE];
+thread_local int RecordManager::cache_ptr_ = -1;
+
+class KeyValueRadixTree {
+    static constexpr size_t FANOUT = 16;
+    NodeManager& node_manager_;
+    RecordManager& record_manager_;
+    std::atomic<uint32_t>& root_ptr_;
+    const uint32_t dim_;
+
+    static inline int get_nibble(const uint64_t* coords, int nibble_idx, int d) {
+        int max_nibbles = d * 16;
+        if (nibble_idx < 0 || nibble_idx >= max_nibbles) return 0;
+        int dim_idx = nibble_idx / 16;
+        int nibble_in_dim = nibble_idx % 16;
+        return (coords[dim_idx] >> (60 - (nibble_in_dim * 4))) & 0x0F;
     }
 
-    void insert(uint64_t key) {
-        if (key & POINTER_TAG) return;
+    static int find_first_differing_nibble(const uint64_t* k1, const uint64_t* k2, int d, int start_nibble = 0) {
+        int max_nibbles = d * 16;
+        for (int i = start_nibble; i < max_nibbles; ++i) {
+            if (get_nibble(k1, i, d) != get_nibble(k2, i, d)) return i;
+        }
+        return -1;
+    }
 
-        uint64_t current_node_offset = root_node_offset;
-        for (unsigned int depth = 0; depth < MAX_DEPTH; ++depth) {
-            Node* current_node = static_cast<Node*>(mem.get_ptr(current_node_offset));
-            int shift = 64 - (depth + 1) * BITS_PER_LEVEL;
-            uint64_t index = (key >> shift) & LEVEL_INDEX_MASK;
+public:
+    KeyValueRadixTree(NodeManager& nm, RecordManager& rm, std::atomic<uint32_t>& root, uint32_t d)
+        : node_manager_(nm), record_manager_(rm), root_ptr_(root), dim_(d) {}
 
-            uint64_t& slot = current_node->slots[index];
+    void insert(const uint64_t* coords, uint64_t value) {
+    restart:
+        std::atomic<uint32_t>* parent_slot = &root_ptr_;
+        uint32_t current_idx = root_ptr_.load(std::memory_order_acquire);
 
-            if (slot == 0) {
-                slot = key;
-                return;
+        while(TaggedIndex::is_node(current_idx)) {
+            RadixNode<FANOUT>* node = node_manager_.get_node<FANOUT>(TaggedIndex::get_index(current_idx));
+            Record* rep_rec = record_manager_.get_record(node->representative_record_idx);
+
+            int diff_idx = find_first_differing_nibble(coords, rep_rec->coords, dim_);
+
+            if (diff_idx != -1 && (uint32_t)diff_idx < node->test_nibble_idx) {
+                uint32_t new_node_idx = node_manager_.allocate_node<FANOUT>();
+                RadixNode<FANOUT>* new_node = node_manager_.get_node<FANOUT>(new_node_idx);
+                uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
+                new_node->test_nibble_idx = diff_idx;
+                new_node->representative_record_idx = new_rec_idx;
+
+                int new_key_nibble = get_nibble(coords, diff_idx, dim_);
+                int existing_key_nibble = get_nibble(rep_rec->coords, diff_idx, dim_);
+
+                new_node->children[new_key_nibble].store(TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_relaxed);
+                new_node->children[existing_key_nibble].store(current_idx, std::memory_order_relaxed);
+
+                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+                goto restart;
             }
-            if (slot & POINTER_TAG) {
-                current_node_offset = slot & OFFSET_MASK;
-                continue;
-            }
-            uint64_t existing_key = slot;
-            if (existing_key == key) return;
+            int nibble = get_nibble(coords, node->test_nibble_idx, dim_);
+            parent_slot = &node->children[nibble];
+            current_idx = parent_slot->load(std::memory_order_acquire);
+        }
 
-            void* new_node_ptr = mem.alloc(sizeof(Node));
-            uint64_t new_node_offset = mem.get_offset(new_node_ptr);
-            slot = new_node_offset | POINTER_TAG;
-            current_node = static_cast<Node*>(new_node_ptr);
-            unsigned int next_depth = depth + 1;
+        if (current_idx == 0) {
+            uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
+            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+            goto restart;
+        }
 
-            while (next_depth < MAX_DEPTH) {
-                int next_shift = 64 - (next_depth + 1) * BITS_PER_LEVEL;
-                uint64_t index_existing = (existing_key >> next_shift) & LEVEL_INDEX_MASK;
-                uint64_t index_new = (key >> next_shift) & LEVEL_INDEX_MASK;
+        if (TaggedIndex::is_leaf(current_idx)) {
+            Record* existing_rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
+            int diff_idx = find_first_differing_nibble(coords, existing_rec->coords, dim_);
+            if (diff_idx == -1) return;
 
-                if (index_existing != index_new) {
-                    current_node->slots[index_existing] = existing_key;
-                    current_node->slots[index_new] = key;
-                    return;
-                }
-                void* intermediate_node_ptr = mem.alloc(sizeof(Node));
-                uint64_t intermediate_node_offset = mem.get_offset(intermediate_node_ptr);
-                current_node->slots[index_existing] = intermediate_node_offset | POINTER_TAG;
-                current_node = static_cast<Node*>(intermediate_node_ptr);
-                next_depth++;
-            }
+            uint32_t new_node_idx = node_manager_.allocate_node<FANOUT>();
+            RadixNode<FANOUT>* new_node = node_manager_.get_node<FANOUT>(new_node_idx);
+            uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
+            new_node->test_nibble_idx = diff_idx;
+            new_node->representative_record_idx = new_rec_idx;
+
+            int new_key_nibble = get_nibble(coords, diff_idx, dim_);
+            int existing_key_nibble = get_nibble(existing_rec->coords, diff_idx, dim_);
+
+            new_node->children[new_key_nibble].store(TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_relaxed);
+            new_node->children[existing_key_nibble].store(current_idx, std::memory_order_relaxed);
+
+            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+            goto restart;
         }
     }
 
-    bool get(uint64_t key) {
-        if (key & POINTER_TAG) return false;
-        uint64_t current_node_offset = root_node_offset;
-        for (unsigned int depth = 0; depth < MAX_DEPTH; ++depth) {
-            Node* current_node = static_cast<Node*>(mem.get_ptr(current_node_offset));
-            int shift = 64 - (depth + 1) * BITS_PER_LEVEL;
-            uint64_t index = (key >> shift) & LEVEL_INDEX_MASK;
-            uint64_t slot = current_node->slots[index];
-
-            if (slot == 0) return false;
-            if (slot & POINTER_TAG) {
-                current_node_offset = slot & OFFSET_MASK;
-                continue;
-            }
-            return slot == key;
+    bool get(const uint64_t* coords) {
+        uint32_t current_idx = root_ptr_.load(std::memory_order_acquire);
+        while (TaggedIndex::is_node(current_idx)) {
+            RadixNode<FANOUT>* node = node_manager_.get_node<FANOUT>(TaggedIndex::get_index(current_idx));
+            int nibble = get_nibble(coords, node->test_nibble_idx, dim_);
+            current_idx = node->children[nibble].load(std::memory_order_acquire);
+        }
+        if (TaggedIndex::is_leaf(current_idx)) {
+            Record* rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
+            if (!rec) return false;
+            return memcmp(rec->coords, coords, dim_ * sizeof(uint64_t)) == 0;
         }
         return false;
     }
-
-    std::vector<uint64_t> scan(uint64_t start, uint64_t end) {
-        std::vector<uint64_t> results;
-        if (start > end) return results;
-        results.reserve(1024); // Avoid reallocations for typical scan sizes
-        scan_recursive(root_node_offset, 0, 0, start, end, results);
-        return results;
-    }
-
-    size_t get_mem_usage() const {
-        return mem.get_allocated_size();
-    }
-
-private:
-    MemoryManager mem;
-    uint64_t root_node_offset;
-
-    void dump_all(uint64_t node_offset, int depth, std::vector<uint64_t>& results) {
-        if (depth >= MAX_DEPTH) return;
-        Node* node = static_cast<Node*>(mem.get_ptr(node_offset));
-        for (int i = 0; i < NODE_SLOTS; ++i) {
-            uint64_t slot = node->slots[i];
-            if (slot == 0) continue;
-            if (slot & POINTER_TAG) {
-                dump_all(slot & OFFSET_MASK, depth + 1, results);
-            } else {
-                results.push_back(slot);
-            }
-        }
-    }
-
-    void scan_recursive(uint64_t node_offset, int depth, uint64_t prefix, uint64_t start, uint64_t end, std::vector<uint64_t>& results) {
-        if (depth >= MAX_DEPTH) return;
-        Node* node = static_cast<Node*>(mem.get_ptr(node_offset));
-
-        int shift = 64 - (depth + 1) * BITS_PER_LEVEL;
-
-        // Calculate Node Bounds
-        int bits_in_subtree = 64 - depth * BITS_PER_LEVEL;
-        if (bits_in_subtree < 0) bits_in_subtree = 0;
-        uint64_t node_upper_bound = prefix | ((bits_in_subtree < 64) ? (1ULL << bits_in_subtree) - 1 : UINT64_MAX);
-
-        // Determine Scan Intersection
-        uint64_t effective_start = std::max(start, prefix);
-        uint64_t effective_end = std::min(end, node_upper_bound);
-
-        if (effective_start > effective_end) return;
-
-        // Calculate Slot Indices
-        uint64_t start_idx = (effective_start >> shift) & LEVEL_INDEX_MASK;
-        uint64_t end_idx = (effective_end >> shift) & LEVEL_INDEX_MASK;
-
-        // Targeted Iteration
-        for (uint64_t i = start_idx; i <= end_idx; ++i) {
-            uint64_t slot = node->slots[i];
-            if (slot == 0) continue;
-
-            uint64_t child_prefix = prefix | (i << shift);
-
-            if (slot & POINTER_TAG) {
-                // For child nodes between start and end, dump all contents.
-                if (i > start_idx && i < end_idx) {
-                    dump_all(slot & OFFSET_MASK, depth + 1, results);
-                } else { // For start and end child nodes, recurse.
-                    scan_recursive(slot & OFFSET_MASK, depth + 1, child_prefix, start, end, results);
-                }
-            } else {
-                uint64_t key = slot;
-                if (key >= start && key <= end) {
-                    results.push_back(key);
-                }
-            }
-        }
-    }
 };
 
-void run_benchmark(size_t num_keys, const std::string& key_type) {
-    const size_t SHT_MEM_SIZE = num_keys * 40;
+const int MAX_DIMS = 8;
+struct Key { uint64_t coords[MAX_DIMS]; };
 
-    std::cout << "\n\n--- Benchmark Run ---" << std::endl;
+void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const std::string& key_type) {
+    std::cout << "\n--- Benchmark: " << dimensionality << "D Key-Value Radix Tree (" << (dimensionality*8) << " bytes) ---" << std::endl;
     std::cout << "--- Configuration: " << num_keys << " keys, " << key_type << " distribution ---" << std::endl;
 
+    ValueStore vs;
+    NodeManager nm;
+    RecordManager rm(&vs, dimensionality);
+    std::atomic<uint32_t> root_ptr(0);
+    KeyValueRadixTree tree(nm, rm, root_ptr, dimensionality);
+
     std::cout << "Preparing keys..." << std::endl;
-    std::vector<uint64_t> keys(num_keys);
-    std::iota(keys.begin(), keys.end(), 1);
+    std::vector<Key> keys(num_keys);
+    std::vector<Key> miss_keys(num_keys);
 
-    std::mt19937_64 rng(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     if (key_type == "Random") {
-        std::shuffle(keys.begin(), keys.end(), rng);
+        std::mt19937_64 rng(12345);
+        for(size_t i = 0; i < num_keys; ++i) {
+            for (int d = 0; d < dimensionality; ++d) {
+                keys[i].coords[d] = rng();
+                miss_keys[i].coords[d] = rng();
+            }
+        }
+    } else { // Sequential
+        for(size_t i = 0; i < num_keys; ++i) {
+            for (int d = 0; d < dimensionality; ++d) {
+                keys[i].coords[d] = i;
+                miss_keys[i].coords[d] = i + num_keys;
+            }
+        }
     }
 
-    // --- Insert Benchmark ---
     std::cout << "\n--- INSERTION ---" << std::endl;
-    // LayeredSlotMap
-    LayeredSlotMap sht(SHT_MEM_SIZE);
     auto start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        sht.insert(key);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back([&, i]() {
+            size_t start = i * (num_keys / num_threads);
+            size_t end = (i == num_threads - 1) ? num_keys : start + (num_keys / num_threads);
+            for (size_t j = start; j < end; ++j) tree.insert(keys[j].coords, j);
+        });
     }
+    for (auto& t : threads) t.join();
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_insert_sht = (double)duration.count() / num_keys;
-    std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_insert_sht << " ns/insert" << std::endl;
+    std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/insert" << std::endl;
 
-    // std::unordered_map
-    std::unordered_map<uint64_t, bool> umap;
-    umap.reserve(num_keys);
+    std::cout << "\n--- HIT LATENCY (LOOKUP) ---" << std::endl;
     start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        umap.insert({key, true});
-    }
+    for (size_t i = 0; i < num_keys; ++i) { tree.get(keys[i].coords); }
     end_time = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_insert_umap = (double)duration.count() / num_keys;
-    std::cout << "[std::unordered_map]  Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_insert_umap << " ns/insert" << std::endl;
+    std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
 
-
-    // --- Get Benchmark ---
-    std::cout << "\n--- LOOKUP ---" << std::endl;
-    if (key_type == "Random") {
-        std::shuffle(keys.begin(), keys.end(), rng);
-    }
-    // LayeredSlotMap
-    size_t found_count = 0;
+    std::cout << "\n--- MISS LATENCY (LOOKUP) ---" << std::endl;
     start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        if (sht.get(key)) {
-            found_count++;
-        }
-    }
+    for (size_t i = 0; i < num_keys; ++i) { tree.get(miss_keys[i].coords); }
     end_time = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_get_sht = (double)duration.count() / num_keys;
-    std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_get_sht << " ns/get" << std::endl;
-    if (found_count != num_keys) std::cerr << "SHT GET VERIFICATION FAILED!" << std::endl;
+    std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
 
-    // std::unordered_map
-    found_count = 0;
-    start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        if (umap.find(key) != umap.end()) {
-            found_count++;
-        }
-    }
-    end_time = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_get_umap = (double)duration.count() / num_keys;
-    std::cout << "[std::unordered_map]  Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_get_umap << " ns/get" << std::endl;
-    if (found_count != num_keys) std::cerr << "UMAP GET VERIFICATION FAILED!" << std::endl;
-
-
-    // --- Scan Benchmark ---
-    const size_t SCAN_SIZE = 1000;
-    if (num_keys > SCAN_SIZE) {
-        std::uniform_int_distribution<uint64_t> dist(1, num_keys - SCAN_SIZE);
-        uint64_t scan_start = dist(rng);
-        uint64_t scan_end = scan_start + SCAN_SIZE - 1;
-
-        std::cout << "\n--- RANGE SCAN ---" << std::endl;
-        std::cout << "(std::unordered_map does not support this operation)" << std::endl;
-
-        start_time = std::chrono::high_resolution_clock::now();
-        std::vector<uint64_t> scan_results = sht.scan(scan_start, scan_end);
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        double ns_per_scan_key = scan_results.empty() ? 0 : (double)duration.count() / scan_results.size();
-
-        std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_scan_key << " ns/key (for a scan of " << scan_results.size() << " keys)" << std::endl;
-        if (scan_results.size() != SCAN_SIZE) std::cerr << "SHT SCAN VERIFICATION FAILED!" << std::endl;
-    }
-
-    // --- MEMORY USAGE ---
     std::cout << "\n--- MEMORY USAGE ---" << std::endl;
-    // LayeredSlotMap
-    size_t mem_used_sht = sht.get_mem_usage();
-    std::cout << "[LayeredSlotMap]      Total (Actual):    " << mem_used_sht / (1024.0 * 1024.0) << " MB" << std::endl;
-    std::cout << "[LayeredSlotMap]      Per Key (Actual):  " << (double)mem_used_sht / num_keys << " bytes/key" << std::endl;
-
-    // std::unordered_map (Estimation)
-    // Formula: (nodes * (key + val + next_ptr)) + (buckets * ptr_size)
-    size_t node_size = sizeof(uint64_t) + sizeof(bool) + sizeof(void*); // Assumes typical node structure
-    size_t mem_used_umap = (umap.size() * node_size) + (umap.bucket_count() * sizeof(void*));
-    std::cout << "[std::unordered_map]  Total (Estimated): " << mem_used_umap / (1024.0 * 1024.0) << " MB" << std::endl;
-    std::cout << "[std::unordered_map]  Per Key (Estimated): " << (double)mem_used_umap / num_keys << " bytes/key" << std::endl;
-    std::cout << "----------------------------------------------------------" << std::endl;
+    size_t total_mem = nm.get_mem_usage() + rm.get_mem_usage();
+    std::cout << "[KeyValueRadixTree] Total (Actual): " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "[KeyValueRadixTree] Per Key (Actual): " << std::fixed << std::setprecision(2) << (double)total_mem / num_keys << " bytes/key" << std::endl;
 }
 
 int main() {
     try {
-        const size_t ONE_MILLION = 1000000;
-        const size_t TEN_MILLION = 10000000;
-        const size_t TWENTY_MILLION = 20000000;
+        const int NUM_THREADS = std::thread::hardware_concurrency();
+        const size_t LARGE_KEY_COUNT = 1000000;
 
-        run_benchmark(ONE_MILLION, "Random");
-        run_benchmark(ONE_MILLION, "Sequential");
+        std::vector<int> dims_to_test = {1, 3, 8};
+        std::vector<std::string> key_types_to_test = {"Random", "Sequential"};
 
-        run_benchmark(TEN_MILLION, "Random");
-        run_benchmark(TEN_MILLION, "Sequential");
-
-        run_benchmark(TWENTY_MILLION, "Random");
-        run_benchmark(TWENTY_MILLION, "Sequential");
+        for (int dims : dims_to_test) {
+            for (const auto& key_type : key_types_to_test) {
+                run_benchmark(LARGE_KEY_COUNT, NUM_THREADS, dims, key_type);
+            }
+        }
 
     } catch (const std::exception& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;

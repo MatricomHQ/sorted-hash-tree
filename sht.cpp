@@ -81,7 +81,7 @@ struct NodePage {
 
 template<size_t FANOUT, size_t SLOTS_PER_PAGE = 16, size_t PAGED_THRESHOLD = 16>
 struct RadixNode {
-    uint32_t test_nibble_idx;
+    uint32_t depth; // The node's distance in traversal steps from the root.
     uint32_t representative_record_idx;
 
     // Conditional compilation for node structure
@@ -97,7 +97,7 @@ struct RadixNode {
         std::atomic<uint32_t>[FANOUT]
     > children_or_pages;
 
-    RadixNode() : test_nibble_idx(0), representative_record_idx(0) {
+    RadixNode() : depth(0), representative_record_idx(0) {
         if constexpr (IS_PAGED) {
             for (size_t i = 0; i < PAGES_PER_NODE; ++i) {
                 children_or_pages[i].store(nullptr, std::memory_order_relaxed);
@@ -234,6 +234,10 @@ public:
 thread_local uint32_t RecordManager::record_cache_[RecordManager::THREAD_CACHE_SIZE];
 thread_local int RecordManager::cache_ptr_ = -1;
 
+const int MAX_DIMS = 8;
+struct Key { uint64_t coords[MAX_DIMS]; };
+struct QueryBox { uint64_t min_coords[MAX_DIMS]; uint64_t max_coords[MAX_DIMS]; };
+
 template<size_t FANOUT, size_t SLOTS_PER_PAGE = 16>
 class KeyValueRadixTree {
     using NodeType = RadixNode<FANOUT, SLOTS_PER_PAGE>;
@@ -244,29 +248,28 @@ class KeyValueRadixTree {
     std::atomic<uint32_t>& root_ptr_;
     const uint32_t dim_;
 
-    static inline int get_key_fragment(const uint64_t* coords, int frag_idx, int d) {
-        if constexpr (FANOUT == 16) { // Nibble-based
-            int max_frags = d * 16;
-            if (frag_idx < 0 || frag_idx >= max_frags) return 0;
-            int dim_idx = frag_idx / 16;
-            int nibble_in_dim = frag_idx % 16;
-            return (coords[dim_idx] >> (60 - (nibble_in_dim * 4))) & 0x0F;
-        } else if constexpr (FANOUT == 256) { // Byte-based
-            int max_frags = d * 8;
-            if (frag_idx < 0 || frag_idx >= max_frags) return 0;
-            int dim_idx = frag_idx / 8;
-            int byte_in_dim = frag_idx % 8;
-            return (coords[dim_idx] >> (56 - (byte_in_dim * 8))) & 0xFF;
-        }
-        return 0; // Should not happen with supported fanouts
-    }
+    // K-D Cyclic Heuristic for selecting the key fragment (byte)
+    static inline int get_key_fragment(const uint64_t* coords, int depth, int d) {
+        if (d <= 0) return 0;
 
-    static int find_first_differing_fragment(const uint64_t* k1, const uint64_t* k2, int d, int start_frag = 0) {
-        int max_frags = d * (FANOUT == 16 ? 16 : 8);
-        for (int i = start_frag; i < max_frags; ++i) {
-            if (get_key_fragment(k1, i, d) != get_key_fragment(k2, i, d)) return i;
+        if constexpr (FANOUT == 256) { // Byte-based
+            int split_dim = depth % d;
+            int chunk_in_dim = depth / d;
+
+            // Each dimension is one uint64_t, which has 8 bytes.
+            if (chunk_in_dim >= 8) {
+                return -1; // Past the end of the key.
+            }
+            // Extract the byte from the coordinate of the chosen dimension.
+            return (coords[split_dim] >> (56 - (chunk_in_dim * 8))) & 0xFF;
+        } else { // FANOUT 16 (Nibble-based) - Not required by spec, but kept for completeness
+            int split_dim = depth % d;
+            int chunk_in_dim = depth / d;
+             if (chunk_in_dim >= 16) {
+                return -1; // Past the end of the key
+            }
+            return (coords[split_dim] >> (60 - (chunk_in_dim * 4))) & 0x0F;
         }
-        return -1;
     }
 
 public:
@@ -277,66 +280,89 @@ public:
     restart:
         std::atomic<uint32_t>* parent_slot = &root_ptr_;
         uint32_t current_idx = root_ptr_.load(std::memory_order_acquire);
+        uint32_t traversal_depth = 0;
 
-        while(TaggedIndex::is_node(current_idx)) {
+        while (TaggedIndex::is_node(current_idx)) {
             NodeType* node = node_manager_.get_node<NodeType>(TaggedIndex::get_index(current_idx));
-            Record* rep_rec = record_manager_.get_record(node->representative_record_idx);
+            traversal_depth = node->depth;
 
-            int diff_idx = find_first_differing_fragment(coords, rep_rec->coords, dim_);
+            int frag = get_key_fragment(coords, traversal_depth, dim_);
+            if (frag == -1) { return; /* Key is a prefix of an existing key, or too long. */ }
 
-            if (diff_idx != -1 && (uint32_t)diff_idx < node->test_nibble_idx) {
-                uint32_t new_node_idx = node_manager_.allocate_node<NodeType>();
-                NodeType* new_node = node_manager_.get_node<NodeType>(new_node_idx);
-                uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
-                new_node->test_nibble_idx = diff_idx;
-                new_node->representative_record_idx = new_rec_idx;
-
-                int new_key_frag = get_key_fragment(coords, diff_idx, dim_);
-                int existing_key_frag = get_key_fragment(rep_rec->coords, diff_idx, dim_);
-
-                std::atomic<uint32_t>* new_child_slot = get_child_slot<true>(new_node, new_key_frag);
-                new_child_slot->store(TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_relaxed);
-
-                std::atomic<uint32_t>* existing_child_slot = get_child_slot<true>(new_node, existing_key_frag);
-                existing_child_slot->store(current_idx, std::memory_order_relaxed);
-
-                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-                goto restart;
-            }
-            int frag = get_key_fragment(coords, node->test_nibble_idx, dim_);
             parent_slot = get_child_slot<true>(node, frag);
             if (!parent_slot) goto restart; // Contention on page creation
+
             current_idx = parent_slot->load(std::memory_order_acquire);
+            traversal_depth++;
         }
 
+        // Case 1: Traversal led to an empty slot. Insert a new leaf.
         if (current_idx == 0) {
             uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
-            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-            goto restart;
+            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_release, std::memory_order_relaxed)) {
+                return;
+            }
+            goto restart; // CAS failed, another thread intervened.
         }
 
+        // Case 2: Traversal led to a leaf. This is a collision, so we must split.
         if (TaggedIndex::is_leaf(current_idx)) {
-            Record* existing_rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
-            int diff_idx = find_first_differing_fragment(coords, existing_rec->coords, dim_);
-            if (diff_idx == -1) return;
+            uint32_t existing_rec_idx = TaggedIndex::get_index(current_idx);
+            Record* existing_rec = record_manager_.get_record(existing_rec_idx);
 
-            uint32_t new_node_idx = node_manager_.allocate_node<NodeType>();
-            NodeType* new_node = node_manager_.get_node<NodeType>(new_node_idx);
+            // If keys are identical, we are done.
+            if (memcmp(coords, existing_rec->coords, dim_ * sizeof(uint64_t)) == 0) {
+                return; // Key already exists.
+            }
+
+            // Find the first depth at which the keys' fragments differ.
+            uint32_t diff_depth = traversal_depth;
+            int new_key_frag, existing_key_frag;
+            while (true) {
+                new_key_frag = get_key_fragment(coords, diff_depth, dim_);
+                existing_key_frag = get_key_fragment(existing_rec->coords, diff_depth, dim_);
+                if (new_key_frag != existing_key_frag || new_key_frag == -1) {
+                    break; // Found the point of divergence or end of key.
+                }
+                diff_depth++;
+            }
+
             uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
-            new_node->test_nibble_idx = diff_idx;
-            new_node->representative_record_idx = new_rec_idx;
 
-            int new_key_frag = get_key_fragment(coords, diff_idx, dim_);
-            int existing_key_frag = get_key_fragment(existing_rec->coords, diff_idx, dim_);
+            // Create the new node where the paths will diverge.
+            uint32_t split_node_idx = node_manager_.allocate_node<NodeType>();
+            NodeType* split_node = node_manager_.get_node<NodeType>(split_node_idx);
+            split_node->depth = diff_depth;
+            split_node->representative_record_idx = new_rec_idx;
 
-            std::atomic<uint32_t>* new_child_slot = get_child_slot<true>(new_node, new_key_frag);
+            // Add the new and existing records as leaves of the new split node.
+            std::atomic<uint32_t>* new_child_slot = get_child_slot<true>(split_node, new_key_frag);
             new_child_slot->store(TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_relaxed);
 
-            std::atomic<uint32_t>* existing_child_slot = get_child_slot<true>(new_node, existing_key_frag);
-            existing_child_slot->store(current_idx, std::memory_order_relaxed);
+            std::atomic<uint32_t>* existing_child_slot = get_child_slot<true>(split_node, existing_key_frag);
+            existing_child_slot->store(TaggedIndex::make_leaf_idx(existing_rec_idx), std::memory_order_relaxed);
 
-            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-            goto restart;
+            // If the keys differed at a greater depth than the current traversal,
+            // we must create a chain of intermediate single-child nodes.
+            uint32_t top_of_chain_idx = TaggedIndex::make_node_idx(split_node_idx);
+            for (int d = diff_depth - 1; d >= (int)traversal_depth; --d) {
+                uint32_t intermediate_node_idx = node_manager_.allocate_node<NodeType>();
+                NodeType* intermediate_node = node_manager_.get_node<NodeType>(intermediate_node_idx);
+                intermediate_node->depth = d;
+                intermediate_node->representative_record_idx = new_rec_idx;
+
+                int common_frag = get_key_fragment(coords, d, dim_);
+                std::atomic<uint32_t>* child_slot = get_child_slot<true>(intermediate_node, common_frag);
+                child_slot->store(top_of_chain_idx, std::memory_order_release);
+
+                top_of_chain_idx = TaggedIndex::make_node_idx(intermediate_node_idx);
+            }
+
+            // Atomically swap the old leaf with the new subtree.
+            if (parent_slot->compare_exchange_strong(current_idx, top_of_chain_idx, std::memory_order_release, std::memory_order_relaxed)) {
+                return;
+            }
+            goto restart; // CAS failed, another thread changed the tree.
         }
     }
 
@@ -344,7 +370,10 @@ public:
         uint32_t current_idx = root_ptr_.load(std::memory_order_acquire);
         while (TaggedIndex::is_node(current_idx)) {
             NodeType* node = node_manager_.get_node<NodeType>(TaggedIndex::get_index(current_idx));
-            int frag = get_key_fragment(coords, node->test_nibble_idx, dim_);
+            int frag = get_key_fragment(coords, node->depth, dim_);
+             if (frag == -1) { // Key is shorter than path, so can't exist.
+                return false;
+            }
 
             std::atomic<uint32_t>* child_slot = get_child_slot<false>(node, frag);
             if (!child_slot) return false; // Page not allocated, so key can't exist
@@ -359,15 +388,21 @@ public:
         return false;
     }
 
-    std::vector<Record*> scan(const uint64_t* start_key, const uint64_t* end_key) {
+    std::vector<Record*> box_query(const QueryBox& box) {
         std::vector<Record*> results;
-        scan_recursive(root_ptr_.load(std::memory_order_acquire), start_key, end_key, true, true, results);
+        bool tight_mins[MAX_DIMS], tight_maxs[MAX_DIMS];
+        for(uint32_t i=0; i<dim_; ++i) {
+            tight_mins[i] = true;
+            tight_maxs[i] = true;
+        }
+        box_query_recursive(root_ptr_.load(std::memory_order_acquire), 0, box, tight_mins, tight_maxs, results);
         return results;
     }
 
 private:
     template<bool create_if_missing>
     std::atomic<uint32_t>* get_child_slot(NodeType* node, int frag) {
+        if (frag < 0) return nullptr;
         if constexpr (NodeType::IS_PAGED) {
             size_t page_idx = frag / SLOTS_PER_PAGE;
             size_t slot_idx_in_page = frag % SLOTS_PER_PAGE;
@@ -379,11 +414,10 @@ private:
                     if (node->children_or_pages[page_idx].compare_exchange_strong(page, new_page, std::memory_order_release, std::memory_order_relaxed)) {
                         page = new_page;
                     } else {
-                        // Another thread beat us, leak our page for now.
                         page = node->children_or_pages[page_idx].load(std::memory_order_acquire);
                     }
                 } else {
-                    return nullptr; // Page does not exist, and we are not creating it.
+                    return nullptr;
                 }
             }
             return &page->children[slot_idx_in_page];
@@ -392,14 +426,20 @@ private:
         }
     }
 
-    void scan_recursive(uint32_t node_idx, const uint64_t* start_key, const uint64_t* end_key, bool tight_lower, bool tight_upper, std::vector<Record*>& results) {
+    void box_query_recursive(uint32_t node_idx, int parent_depth, const QueryBox& box, bool tight_mins[], bool tight_maxs[], std::vector<Record*>& results) {
         if (!node_idx) return;
 
         if (TaggedIndex::is_leaf(node_idx)) {
             Record* rec = record_manager_.get_record(TaggedIndex::get_index(node_idx));
             if (rec) {
-                if ((!tight_lower || memcmp(rec->coords, start_key, dim_ * sizeof(uint64_t)) >= 0) &&
-                    (!tight_upper || memcmp(rec->coords, end_key, dim_ * sizeof(uint64_t)) <= 0)) {
+                bool is_inside = true;
+                for (uint32_t d = 0; d < dim_; ++d) {
+                    if (rec->coords[d] < box.min_coords[d] || rec->coords[d] > box.max_coords[d]) {
+                        is_inside = false;
+                        break;
+                    }
+                }
+                if (is_inside) {
                     results.push_back(rec);
                 }
             }
@@ -407,197 +447,294 @@ private:
         }
 
         NodeType* node = node_manager_.get_node<NodeType>(TaggedIndex::get_index(node_idx));
-        int start_frag = tight_lower ? get_key_fragment(start_key, node->test_nibble_idx, dim_) : 0;
-        int end_frag = tight_upper ? get_key_fragment(end_key, node->test_nibble_idx, dim_) : FANOUT - 1;
+
+        auto get_byte = [](uint64_t val, int chunk) { return (val >> (56 - (chunk * 8))) & 0xFF; };
+
+        // --- Path Compression Pruning ---
+        // This is the crucial fix. Check the compressed path from the parent's depth to this node's depth.
+        Record* rep_rec = record_manager_.get_record(node->representative_record_idx);
+        if (rep_rec) {
+            for (int d = parent_depth; d < node->depth; ++d) {
+                int check_dim = d % dim_;
+                int chunk_in_dim = d / dim_;
+                if (chunk_in_dim >= 8) continue;
+
+                int rep_frag = get_byte(rep_rec->coords[check_dim], chunk_in_dim);
+
+                if (tight_mins[check_dim]) {
+                    int min_frag = get_byte(box.min_coords[check_dim], chunk_in_dim);
+                    if (rep_frag < min_frag) return;
+                }
+                if (tight_maxs[check_dim]) {
+                    int max_frag = get_byte(box.max_coords[check_dim], chunk_in_dim);
+                    if (rep_frag > max_frag) return;
+                }
+            }
+        }
+
+        int depth = node->depth;
+        int split_dim = depth % dim_;
+        int chunk_in_dim = depth / dim_;
+
+        if (chunk_in_dim >= 8) { return; }
+
+        int start_frag = tight_mins[split_dim] ? get_byte(box.min_coords[split_dim], chunk_in_dim) : 0;
+        int end_frag   = tight_maxs[split_dim] ? get_byte(box.max_coords[split_dim], chunk_in_dim) : 255;
 
         for (int i = start_frag; i <= end_frag; ++i) {
             std::atomic<uint32_t>* child_slot = get_child_slot<false>(node, i);
             if (!child_slot) continue;
-
             uint32_t child_idx = child_slot->load(std::memory_order_acquire);
-            if (child_idx) {
-                bool next_tight_lower = tight_lower && (i == start_frag);
-                bool next_tight_upper = tight_upper && (i == end_frag);
-                scan_recursive(child_idx, start_key, end_key, next_tight_lower, next_tight_upper, results);
-            }
+            if (!child_idx) continue;
+
+            bool next_tight_mins[MAX_DIMS];
+            bool next_tight_maxs[MAX_DIMS];
+            memcpy(next_tight_mins, tight_mins, dim_ * sizeof(bool));
+            memcpy(next_tight_maxs, tight_maxs, dim_ * sizeof(bool));
+
+            next_tight_mins[split_dim] = tight_mins[split_dim] && (i == start_frag);
+            next_tight_maxs[split_dim] = tight_maxs[split_dim] && (i == end_frag);
+
+            box_query_recursive(child_idx, depth + 1, box, next_tight_mins, next_tight_maxs, results);
         }
     }
 };
 
-const int MAX_DIMS = 8;
-struct Key { uint64_t coords[MAX_DIMS]; };
-
-template<size_t FANOUT, size_t SLOTS_PER_PAGE>
-void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const std::string& key_type) {
-    std::cout << "\n--- Benchmark: " << dimensionality << "D Key-Value Radix Tree (" << (dimensionality*8) << " bytes), FANOUT=" << FANOUT << ", SLOTS_PER_PAGE=" << SLOTS_PER_PAGE << " ---" << std::endl;
-    std::cout << "--- Configuration: " << num_keys << " keys, " << key_type << " distribution ---" << std::endl;
-
-    using TreeType = KeyValueRadixTree<FANOUT, SLOTS_PER_PAGE>;
-    using NodeType = RadixNode<FANOUT, SLOTS_PER_PAGE>;
-    using PageType = NodePage<SLOTS_PER_PAGE>;
-
-    ValueStore vs;
-    NodeManager nm(sizeof(NodeType));
-    RecordManager rm(&vs, dimensionality);
-    PageManager pm(sizeof(PageType));
-    std::atomic<uint32_t> root_ptr(0);
-    TreeType tree(nm, rm, pm, root_ptr, dimensionality);
-
-    std::cout << "Preparing keys..." << std::endl;
-    std::vector<Key> keys(num_keys);
-    std::vector<Key> miss_keys(num_keys);
-
-    if (key_type == "Random") {
-        std::mt19937_64 rng(12345);
-        for(size_t i = 0; i < num_keys; ++i) {
-            for (int d = 0; d < dimensionality; ++d) {
-                keys[i].coords[d] = rng();
-                miss_keys[i].coords[d] = rng();
-            }
-        }
-    } else { // Sequential
-        for(size_t i = 0; i < num_keys; ++i) {
-            for (int d = 0; d < dimensionality; ++d) {
-                keys[i].coords[d] = i;
-                miss_keys[i].coords[d] = i + num_keys;
-            }
-        }
-    }
-
-    std::cout << "\n--- INSERTION ---" << std::endl;
-    auto start_time = std::chrono::high_resolution_clock::now();
-    std::vector<std::thread> threads;
-    for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back([&, i]() {
-            size_t start = i * (num_keys / num_threads);
-            size_t end = (i == num_threads - 1) ? num_keys : start + (num_keys / num_threads);
-            for (size_t j = start; j < end; ++j) tree.insert(keys[j].coords, j);
-        });
-    }
-    for (auto& t : threads) t.join();
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/insert" << std::endl;
-
-    std::cout << "\n--- HIT LATENCY (LOOKUP) ---" << std::endl;
-    size_t found_count = 0;
-    start_time = std::chrono::high_resolution_clock::now();
-    for (size_t i = 0; i < num_keys; ++i) {
-        if (tree.get(keys[i].coords)) {
-            found_count++;
-        }
-    }
-    end_time = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
-    if (found_count == num_keys) {
-        std::cout << "  Verification: SUCCESS" << std::endl;
-    } else {
-        std::cout << "  Verification: FAILED (Found " << found_count << "/" << num_keys << ")" << std::endl;
-    }
-
-    std::cout << "\n--- MISS LATENCY (LOOKUP) ---" << std::endl;
-    start_time = std::chrono::high_resolution_clock::now();
-    for (size_t i = 0; i < num_keys; ++i) { tree.get(miss_keys[i].coords); }
-    end_time = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
-
-    std::cout << "\n--- MEMORY USAGE ---" << std::endl;
-    size_t total_mem = nm.get_mem_usage() + rm.get_mem_usage();
-    std::cout << "[KeyValueRadixTree] Total (Actual): " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB" << std::endl;
-    std::cout << "[KeyValueRadixTree] Per Key (Actual): " << std::fixed << std::setprecision(2) << (double)total_mem / num_keys << " bytes/key" << std::endl;
-
-    // --- Unordered Map Benchmark ---
-    if (FANOUT == 16) { // Only run this once to avoid redundant output
-        std::cout << "\n--- std::unordered_map Benchmark (string key) ---" << std::endl;
-        std::unordered_map<std::string, uint64_t> umap;
-
-        // Insertion
-        start_time = std::chrono::high_resolution_clock::now();
-        for (size_t i = 0; i < num_keys; ++i) {
-            std::string key_str(reinterpret_cast<const char*>(keys[i].coords), dimensionality * sizeof(uint64_t));
-            umap[key_str] = i;
-        }
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/insert" << std::endl;
-
-        // Hit Latency
-        start_time = std::chrono::high_resolution_clock::now();
-        for (size_t i = 0; i < num_keys; ++i) {
-            std::string key_str(reinterpret_cast<const char*>(keys[i].coords), dimensionality * sizeof(uint64_t));
-            volatile auto it = umap.find(key_str);
-        }
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
-
-        // Miss Latency
-        start_time = std::chrono::high_resolution_clock::now();
-        for (size_t i = 0; i < num_keys; ++i) {
-            std::string key_str(reinterpret_cast<const char*>(miss_keys[i].coords), dimensionality * sizeof(uint64_t));
-            volatile auto it = umap.find(key_str);
-        }
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
-    }
-
-
-    if (key_type == "Sequential" && num_keys > 1000) {
-        std::cout << "\n--- RANGE SCAN ---" << std::endl;
-        const size_t scan_size = 1000;
-        size_t start_idx = num_keys / 4;
-        const uint64_t* start_key = keys[start_idx].coords;
-        const uint64_t* end_key = keys[start_idx + scan_size - 1].coords;
-
-        start_time = std::chrono::high_resolution_clock::now();
-        std::vector<Record*> scan_results = tree.scan(start_key, end_key);
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-
-        if (!scan_results.empty()) {
-            std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / scan_results.size() << " ns/key (" << scan_results.size() << " keys)" << std::endl;
-        } else {
-             std::cout << "[KeyValueRadixTree] Scan found no results." << std::endl;
-        }
-        if (scan_results.size() != scan_size) {
-            std::cerr << "  SCAN VERIFICATION FAILED! Expected " << scan_size << ", got " << scan_results.size() << std::endl;
-        }
-    }
-}
-
-template<size_t FANOUT, size_t SLOTS_PER_PAGE>
-void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const std::string& key_type);
-
 int main(int argc, char* argv[]) {
     try {
-        int num_threads = std::thread::hardware_concurrency();
-        if (argc > 1) {
-            num_threads = std::stoi(argv[1]);
-        }
-        std::cout << "--- Running with " << num_threads << " threads ---" << std::endl;
+        const size_t NUM_KEYS = 1000000;
+        const int DIMS = 8;
+        const size_t FANOUT = 256;
+        const size_t SLOTS_PER_PAGE = 16;
 
-        const size_t LARGE_KEY_COUNT = 1000000;
+        using TreeType = KeyValueRadixTree<FANOUT, SLOTS_PER_PAGE>;
+        using NodeType = RadixNode<FANOUT, SLOTS_PER_PAGE>;
+        using PageType = NodePage<SLOTS_PER_PAGE>;
 
-        std::vector<int> dims_to_test = {1, 3, 8};
-        std::vector<std::string> key_types_to_test = {"Random", "Sequential"};
-        std::vector<size_t> slots_to_test = {4, 8, 16};
-
-        for (int dims : dims_to_test) {
-            for (const auto& key_type : key_types_to_test) {
-                // Run baseline FANOUT=16
-                run_benchmark<16, 16>(LARGE_KEY_COUNT, num_threads, dims, key_type);
-
-                // Test different slot sizes for FANOUT=256
-                for (size_t slots : slots_to_test) {
-                    if (slots == 4) run_benchmark<256, 4>(LARGE_KEY_COUNT, num_threads, dims, key_type);
-                    if (slots == 8) run_benchmark<256, 8>(LARGE_KEY_COUNT, num_threads, dims, key_type);
-                    if (slots == 16) run_benchmark<256, 16>(LARGE_KEY_COUNT, num_threads, dims, key_type);
-                }
+        // --- Prepare Keys ---
+        std::cout << "--- CYCLOPS Benchmark Gauntlet ---" << std::endl;
+        std::cout << "--- Dims=" << DIMS << ", Keys=" << NUM_KEYS << ", FANOUT=" << FANOUT << ", SLOTS_PER_PAGE=" << SLOTS_PER_PAGE << " ---" << std::endl;
+        std::cout << "\nPreparing " << NUM_KEYS << " random keys..." << std::endl;
+        auto keys = std::make_unique<std::vector<Key>>(NUM_KEYS);
+        auto miss_keys = std::make_unique<std::vector<Key>>(NUM_KEYS);
+        std::mt19937_64 rng(12345);
+        for(size_t i = 0; i < NUM_KEYS; ++i) {
+            for (int d = 0; d < DIMS; ++d) {
+                (*keys)[i].coords[d] = rng();
+                (*miss_keys)[i].coords[d] = rng();
             }
         }
+
+        // --- Unordered Map Benchmark (Baseline) ---
+        std::cout << "\n--- std::unordered_map Benchmark (Baseline) ---" << std::endl;
+        std::unordered_map<std::string, uint64_t> umap;
+        auto start_time = std::chrono::high_resolution_clock::now();
+        for (size_t i = 0; i < NUM_KEYS; ++i) {
+            std::string key_str(reinterpret_cast<const char*>((*keys)[i].coords), DIMS * sizeof(uint64_t));
+            umap[key_str] = i;
+        }
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+        std::cout << "unordered_map Insert: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
+
+        start_time = std::chrono::high_resolution_clock::now();
+        for (size_t i = 0; i < NUM_KEYS; ++i) {
+            std::string key_str(reinterpret_cast<const char*>((*keys)[i].coords), DIMS * sizeof(uint64_t));
+            volatile auto it = umap.find(key_str);
+        }
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+        std::cout << "unordered_map Get (Hit): " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
+
+        // --- Memory and Scalability Benchmark ---
+        std::cout << "\n--- Memory & Insertion Scalability ---" << std::endl;
+        std::vector<int> thread_counts = {1, 2, 4, 8};
+        if (argc > 1) {
+            thread_counts.clear();
+            for(int i = 1; i < argc; ++i) thread_counts.push_back(std::stoi(argv[i]));
+        }
+
+        for (int num_threads : thread_counts) {
+            ValueStore vs;
+            NodeManager nm(sizeof(NodeType));
+            RecordManager rm(&vs, DIMS);
+            PageManager pm(sizeof(PageType));
+            std::atomic<uint32_t> root_ptr(0);
+            TreeType temp_tree(nm, rm, pm, root_ptr, DIMS);
+
+            auto start_time_insert = std::chrono::high_resolution_clock::now();
+            std::vector<std::thread> threads;
+            for (int i = 0; i < num_threads; ++i) {
+                threads.emplace_back([&, i]() {
+                    size_t start = i * (NUM_KEYS / num_threads);
+                    size_t end = (i == num_threads - 1) ? NUM_KEYS : start + (num_threads / num_threads);
+                    for (size_t j = start; j < end; ++j) temp_tree.insert((*keys)[j].coords, j);
+                });
+            }
+            for (auto& t : threads) t.join();
+            auto end_time_insert = std::chrono::high_resolution_clock::now();
+            auto duration_insert = std::chrono::duration_cast<std::chrono::milliseconds>(end_time_insert - start_time_insert);
+            double throughput = (duration_insert.count() > 0) ? (double)NUM_KEYS / duration_insert.count() * 1000.0 : 0;
+            std::cout << "Scalability_Insert " << num_threads << " Threads: " << std::fixed << std::setprecision(0) << throughput << " ops/sec" << std::endl;
+        }
+
+        // --- Build Main Tree for Querying ---
+        std::cout << "\nBuilding main tree for query tests with 8 threads..." << std::endl;
+        ValueStore vs_main;
+        NodeManager nm_main(sizeof(NodeType));
+        RecordManager rm_main(&vs_main, DIMS);
+        PageManager pm_main(sizeof(PageType));
+        std::atomic<uint32_t> root_ptr_main(0);
+        TreeType tree(nm_main, rm_main, pm_main, root_ptr_main, DIMS);
+
+        auto build_start = std::chrono::high_resolution_clock::now();
+        std::vector<std::thread> build_threads;
+        int build_thread_count = 8;
+        for (int i = 0; i < build_thread_count; ++i) {
+           build_threads.emplace_back([&, i]() {
+               size_t start = i * (NUM_KEYS / build_thread_count);
+               size_t end = (i == build_thread_count - 1) ? NUM_KEYS : start + (NUM_KEYS / build_thread_count);
+               for (size_t j = start; j < end; ++j) tree.insert((*keys)[j].coords, j);
+           });
+        }
+        for(auto& t : build_threads) t.join();
+        auto build_end = std::chrono::high_resolution_clock::now();
+        auto build_duration = std::chrono::duration_cast<std::chrono::milliseconds>(build_end - build_start);
+        std::cout << "Tree built in " << build_duration.count() << " ms." << std::endl;
+        size_t total_mem = nm_main.get_mem_usage() + rm_main.get_mem_usage() + pm_main.get_mem_usage();
+        std::cout << "Memory_Per_Key: " << std::fixed << std::setprecision(2) << (double)total_mem / NUM_KEYS << " bytes/key" << std::endl;
+
+        // --- Query Performance Benchmarks ---
+        std::cout << "\n--- Point Performance ---" << std::endl;
+        size_t found_count = 0;
+        start_time = std::chrono::high_resolution_clock::now();
+        for (size_t i = 0; i < NUM_KEYS; ++i) {
+            if(tree.get((*keys)[i].coords)) found_count++;
+        }
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+        std::cout << "Point_Get_Hit: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
+        if (found_count != NUM_KEYS) {
+             std::cout << "  Verification FAILED: Found " << found_count << "/" << NUM_KEYS << " keys." << std::endl;
+        } else {
+             std::cout << "  Verification SUCCESS: Found all " << NUM_KEYS << " keys." << std::endl;
+        }
+
+        start_time = std::chrono::high_resolution_clock::now();
+        for (size_t i = 0; i < NUM_KEYS; ++i) { tree.get((*miss_keys)[i].coords); }
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+        std::cout << "Point_Get_Miss: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
+
+
+        std::cout << "\n--- Spatial Query Performance ---" << std::endl;
+        QueryBox box;
+        Key query_center_key = (*keys)[NUM_KEYS / 4]; // Pick a key guaranteed to be in the set
+        const uint64_t WIDE_BOX_DELTA = std::numeric_limits<uint64_t>::max() / 8; // 25% of total space
+        const uint64_t NARROW_BOX_DELTA = std::numeric_limits<uint64_t>::max() / 2000; // 0.1% of total space
+
+        // Wide Box (25% of space)
+        for(int d=0; d<DIMS; ++d) {
+            uint64_t c = query_center_key.coords[d];
+            box.min_coords[d] = (c > WIDE_BOX_DELTA) ? c - WIDE_BOX_DELTA : 0;
+            box.max_coords[d] = (c < std::numeric_limits<uint64_t>::max() - WIDE_BOX_DELTA) ? c + WIDE_BOX_DELTA : std::numeric_limits<uint64_t>::max();
+        }
+        start_time = std::chrono::high_resolution_clock::now();
+        auto wide_results = tree.box_query(box);
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+        std::cout << "Wide_Box_Query (25%): " << duration.count() << " us (" << wide_results.size() << " results)" << std::endl;
+
+        // Narrow Box (0.1% of space)
+        for(int d=0; d<DIMS; ++d) {
+            uint64_t c = query_center_key.coords[d];
+            box.min_coords[d] = (c > NARROW_BOX_DELTA) ? c - NARROW_BOX_DELTA : 0;
+            box.max_coords[d] = (c < std::numeric_limits<uint64_t>::max() - NARROW_BOX_DELTA) ? c + NARROW_BOX_DELTA : std::numeric_limits<uint64_t>::max();
+        }
+        start_time = std::chrono::high_resolution_clock::now();
+        auto narrow_results = tree.box_query(box);
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+        std::cout << "Narrow_Box_Query (0.1%): " << duration.count() << " us (" << narrow_results.size() << " results)" << std::endl;
+
+        // Elongated Box
+        for(int d=0; d<DIMS; ++d) {
+            uint64_t c = query_center_key.coords[d];
+            if (d % 2 == 0) { // Wide (50%)
+                 const uint64_t ELONGATED_WIDE_DELTA = std::numeric_limits<uint64_t>::max() / 4;
+                 box.min_coords[d] = (c > ELONGATED_WIDE_DELTA) ? c - ELONGATED_WIDE_DELTA : 0;
+                 box.max_coords[d] = (c < std::numeric_limits<uint64_t>::max() - ELONGATED_WIDE_DELTA) ? c + ELONGATED_WIDE_DELTA : std::numeric_limits<uint64_t>::max();
+            } else { // Narrow (0.1%)
+                box.min_coords[d] = (c > NARROW_BOX_DELTA) ? c - NARROW_BOX_DELTA : 0;
+                box.max_coords[d] = (c < std::numeric_limits<uint64_t>::max() - NARROW_BOX_DELTA) ? c + NARROW_BOX_DELTA : std::numeric_limits<uint64_t>::max();
+            }
+        }
+        start_time = std::chrono::high_resolution_clock::now();
+        auto elongated_results = tree.box_query(box);
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+        std::cout << "Elongated_Box_Query: " << duration.count() << " us (" << elongated_results.size() << " results)" << std::endl;
+
+
+        std::cout << "\n--- Lexicographical Emulation & Hybrid Performance ---" << std::endl;
+        // Lex_Scan_Emulation - Create a valid box around a range of lexicographically sorted keys
+        std::sort(keys->begin(), keys->end(), [](const Key& a, const Key& b){
+            return std::memcmp(a.coords, b.coords, sizeof(Key)) < 0;
+        });
+        size_t scan_start_idx = NUM_KEYS / 2;
+        size_t scan_count = 1000;
+        // To create a valid box, we must find the min/max for each dimension within the scan range
+        for(int d=0; d<DIMS; ++d) {
+            box.min_coords[d] = (*keys)[scan_start_idx].coords[d];
+            box.max_coords[d] = (*keys)[scan_start_idx].coords[d];
+        }
+        for(size_t i = scan_start_idx + 1; i < scan_start_idx + scan_count; ++i) {
+            for(int d=0; d<DIMS; ++d) {
+                if ((*keys)[i].coords[d] < box.min_coords[d]) box.min_coords[d] = (*keys)[i].coords[d];
+                if ((*keys)[i].coords[d] > box.max_coords[d]) box.max_coords[d] = (*keys)[i].coords[d];
+            }
+        }
+        start_time = std::chrono::high_resolution_clock::now();
+        auto lex_results = tree.box_query(box);
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+        std::cout << "Lex_Scan_Emulation: " << duration.count() << " us (" << lex_results.size() << " results)" << std::endl;
+
+        // Prefix_Plus_Narrow_Box
+        Key center_key = (*keys)[NUM_KEYS/2];
+        for(int d=0; d<DIMS; ++d) {
+            if (d < 4) { // Exact match prefix
+                box.min_coords[d] = center_key.coords[d];
+                box.max_coords[d] = center_key.coords[d];
+            } else { // Narrow box
+                uint64_t c = center_key.coords[d];
+                box.min_coords[d] = (c > NARROW_BOX_DELTA) ? c - NARROW_BOX_DELTA : 0;
+                box.max_coords[d] = (c < std::numeric_limits<uint64_t>::max() - NARROW_BOX_DELTA) ? c + NARROW_BOX_DELTA : std::numeric_limits<uint64_t>::max();
+            }
+        }
+        start_time = std::chrono::high_resolution_clock::now();
+        auto prefix_narrow_results = tree.box_query(box);
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+        std::cout << "Prefix_Plus_Narrow_Box: " << duration.count() << " us (" << prefix_narrow_results.size() << " results)" << std::endl;
+
+        // Wide_Box_Plus_Suffix
+        for(int d=0; d<DIMS; ++d) {
+            if (d < 4) { // Wide box
+                uint64_t c = center_key.coords[d];
+                box.min_coords[d] = (c > WIDE_BOX_DELTA) ? c - WIDE_BOX_DELTA : 0;
+                box.max_coords[d] = (c < std::numeric_limits<uint64_t>::max() - WIDE_BOX_DELTA) ? c + WIDE_BOX_DELTA : std::numeric_limits<uint64_t>::max();
+            } else { // Exact match suffix
+                box.min_coords[d] = center_key.coords[d];
+                box.max_coords[d] = center_key.coords[d];
+            }
+        }
+        start_time = std::chrono::high_resolution_clock::now();
+        auto wide_suffix_results = tree.box_query(box);
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+        std::cout << "Wide_Box_Plus_Suffix: " << duration.count() << " us (" << wide_suffix_results.size() << " results)" << std::endl;
+
 
     } catch (const std::exception& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;

@@ -1,0 +1,33 @@
+--- CYCLOPS Benchmark Gauntlet ---
+--- Dims=8, Keys=1000000, FANOUT=256, SLOTS_PER_PAGE=16 ---
+
+Preparing 1000000 random keys...
+
+--- std::unordered_map Benchmark (Baseline) ---
+unordered_map Insert: 782.84 ns/op
+unordered_map Get (Hit): 413.13 ns/op
+
+--- Memory & Insertion Scalability ---
+Scalability_Insert 1 Threads: 2659574 ops/sec
+Scalability_Insert 2 Threads: 2212389 ops/sec
+Scalability_Insert 4 Threads: 13157895 ops/sec
+Scalability_Insert 8 Threads: 29411765 ops/sec
+
+Building main tree for query tests with 8 threads...
+Tree built in 90 ms.
+Memory_Per_Key: 138.05 bytes/key
+
+--- Point Performance ---
+Point_Get_Hit: 201.16 ns/op
+  Verification SUCCESS: Found all 1000000 keys.
+Point_Get_Miss: 158.95 ns/op
+
+--- Spatial Query Performance ---
+Wide_Box_Query (25%): 3698000 us (8 results)
+Narrow_Box_Query (0.1%): 2000 us (1 results)
+Elongated_Box_Query: 129000 us (1 results)
+
+--- Lexicographical Emulation & Hybrid Performance ---
+Lex_Scan_Emulation: 338618000 us (988392 results)
+Prefix_Plus_Narrow_Box: 3000 us (1 results)
+Wide_Box_Plus_Suffix: 4919000 us (1 results)

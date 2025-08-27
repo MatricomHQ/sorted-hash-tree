@@ -1,387 +1,261 @@
+#include "stax_dimensional.h"
+#include <array>
 #include <iostream>
 #include <vector>
 #include <cstdint>
-#include <stdexcept>
 #include <chrono>
 #include <random>
 #include <algorithm>
 #include <numeric>
-#include <sys/mman.h>
-#include <unistd.h>
+#include <thread>
 #include <iomanip>
-#include <string>
-#include <unordered_map>
 
-// --- Constants for the data structure ---
-const uint64_t POINTER_TAG = 1ULL << 63;
-const uint64_t OFFSET_MASK = ~(POINTER_TAG);
-const unsigned int BITS_PER_LEVEL = 16;
-const unsigned int NODE_SLOTS = 1 << BITS_PER_LEVEL;
-const uint64_t LEVEL_INDEX_MASK = NODE_SLOTS - 1;
-const unsigned int MAX_DEPTH = (63 + BITS_PER_LEVEL - 1) / BITS_PER_LEVEL;
+// =================================================================================================
+// --- UTILITY & DATA GENERATION ---
+// =================================================================================================
 
-
-// A simple memory manager using a single mmap-ed region.
-class MemoryManager {
-public:
-    explicit MemoryManager(size_t size) : allocation_size(size) {
-        base_ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (base_ptr == MAP_FAILED) {
-            throw std::runtime_error("Failed to mmap memory");
-        }
-        current_ptr = static_cast<uint8_t*>(base_ptr);
-        end_ptr = current_ptr + size;
-        allocated_bytes = 0;
-    }
-
-    ~MemoryManager() {
-        if (base_ptr != MAP_FAILED) {
-            munmap(base_ptr, allocation_size);
-        }
-    }
-
-    MemoryManager(const MemoryManager&) = delete;
-    MemoryManager& operator=(const MemoryManager&) = delete;
-
-    void* alloc(size_t size) {
-        size_t aligned_size = (size + 7) & ~7;
-        if (current_ptr + aligned_size > end_ptr) {
-            throw std::bad_alloc();
-        }
-        void* mem = current_ptr;
-        current_ptr += aligned_size;
-        allocated_bytes += aligned_size;
-        std::fill(static_cast<uint64_t*>(mem), static_cast<uint64_t*>(mem) + aligned_size / sizeof(uint64_t), 0);
-        return mem;
-    }
-
-    uint64_t get_offset(const void* ptr) const {
-        return static_cast<const uint8_t*>(ptr) - static_cast<uint8_t*>(base_ptr);
-    }
-
-    void* get_ptr(uint64_t offset) const {
-        return static_cast<uint8_t*>(base_ptr) + offset;
-    }
-
-    size_t get_allocated_size() const {
-        return allocated_bytes;
-    }
-
-private:
-    void* base_ptr = nullptr;
-    uint8_t* current_ptr = nullptr;
-    uint8_t* end_ptr = nullptr;
-    size_t allocation_size = 0;
-    size_t allocated_bytes = 0;
-};
-
-
-// The core node structure. It's exactly 64 bytes (a cache line).
-struct Node {
-    uint64_t slots[NODE_SLOTS];
-};
-
-
-// The main data structure class.
-class LayeredSlotMap {
-public:
-    explicit LayeredSlotMap(size_t size) : mem(size) {
-        void* root_node_ptr = mem.alloc(sizeof(Node));
-        root_node_offset = mem.get_offset(root_node_ptr);
-    }
-
-    void insert(uint64_t key) {
-        if (key & POINTER_TAG) return;
-
-        uint64_t current_node_offset = root_node_offset;
-        for (unsigned int depth = 0; depth < MAX_DEPTH; ++depth) {
-            Node* current_node = static_cast<Node*>(mem.get_ptr(current_node_offset));
-            int shift = 63 - (depth + 1) * BITS_PER_LEVEL;
-            if (shift < 0) shift = 0;
-            uint64_t index = (key >> shift) & LEVEL_INDEX_MASK;
-
-            uint64_t& slot = current_node->slots[index];
-
-            if (slot == 0) {
-                slot = key;
-                return;
-            }
-            if (slot & POINTER_TAG) {
-                current_node_offset = slot & OFFSET_MASK;
-                continue;
-            }
-            uint64_t existing_key = slot;
-            if (existing_key == key) return;
-
-            void* new_node_ptr = mem.alloc(sizeof(Node));
-            uint64_t new_node_offset = mem.get_offset(new_node_ptr);
-            slot = new_node_offset | POINTER_TAG;
-            current_node = static_cast<Node*>(new_node_ptr);
-            unsigned int next_depth = depth + 1;
-
-            while (next_depth < MAX_DEPTH) {
-                int next_shift = 63 - (next_depth + 1) * BITS_PER_LEVEL;
-                if (next_shift < 0) next_shift = 0;
-                uint64_t index_existing = (existing_key >> next_shift) & LEVEL_INDEX_MASK;
-                uint64_t index_new = (key >> next_shift) & LEVEL_INDEX_MASK;
-
-                if (index_existing != index_new) {
-                    current_node->slots[index_existing] = existing_key;
-                    current_node->slots[index_new] = key;
-                    return;
-                }
-                void* intermediate_node_ptr = mem.alloc(sizeof(Node));
-                uint64_t intermediate_node_offset = mem.get_offset(intermediate_node_ptr);
-                current_node->slots[index_existing] = intermediate_node_offset | POINTER_TAG;
-                current_node = static_cast<Node*>(intermediate_node_ptr);
-                next_depth++;
-            }
-        }
-    }
-
-    bool get(uint64_t key) {
-        if (key & POINTER_TAG) return false;
-        uint64_t current_node_offset = root_node_offset;
-        for (unsigned int depth = 0; depth < MAX_DEPTH; ++depth) {
-            Node* current_node = static_cast<Node*>(mem.get_ptr(current_node_offset));
-            int shift = 63 - (depth + 1) * BITS_PER_LEVEL;
-            if (shift < 0) shift = 0;
-            uint64_t index = (key >> shift) & LEVEL_INDEX_MASK;
-            uint64_t slot = current_node->slots[index];
-
-            if (slot == 0) return false;
-            if (slot & POINTER_TAG) {
-                current_node_offset = slot & OFFSET_MASK;
-                continue;
-            }
-            return slot == key;
-        }
-        return false;
-    }
-
-    std::vector<uint64_t> scan(uint64_t start, uint64_t end) {
-        std::vector<uint64_t> results;
-        if (start > end) return results;
-        results.reserve(1024); // Avoid reallocations for typical scan sizes
-        scan_recursive(root_node_offset, 0, 0, start, end, results);
-        return results;
-    }
-
-    size_t get_mem_usage() const {
-        return mem.get_allocated_size();
-    }
-
-private:
-    MemoryManager mem;
-    uint64_t root_node_offset;
-
-    void dump_recursive(uint64_t node_offset, int depth, std::vector<uint64_t>& results) {
-        if (depth >= MAX_DEPTH) return;
-        Node* node = static_cast<Node*>(mem.get_ptr(node_offset));
-
-        for (int i = 0; i < NODE_SLOTS; ++i) {
-            uint64_t slot = node->slots[i];
-            if (slot == 0) continue;
-
-            if (slot & POINTER_TAG) {
-                dump_recursive(slot & OFFSET_MASK, depth + 1, results);
-            } else {
-                results.push_back(slot);
-            }
-        }
-    }
-
-    void scan_recursive(uint64_t node_offset, int depth, uint64_t current_prefix, uint64_t start, uint64_t end, std::vector<uint64_t>& results) {
-        if (depth >= MAX_DEPTH) return;
-
-        // Determine the key range this node is responsible for.
-        int bits_in_prefix = depth * BITS_PER_LEVEL;
-        int remaining_bits = 63 - bits_in_prefix;
-        uint64_t node_range_mask = (remaining_bits < 63) ? (1ULL << remaining_bits) - 1 : (UINT64_MAX & ~POINTER_TAG);
-        uint64_t node_lower_bound = current_prefix;
-        uint64_t node_upper_bound = current_prefix | node_range_mask;
-
-        if (start > node_upper_bound || end < node_lower_bound) {
-            return; // No overlap.
-        }
-
-        Node* node = static_cast<Node*>(mem.get_ptr(node_offset));
-
-        // If the query range completely covers this node's range, dump everything.
-        if (start <= node_lower_bound && end >= node_upper_bound) {
-            dump_recursive(node_offset, depth, results);
-            return;
-        }
-
-        // Partial overlap. Calculate the precise slot range to iterate.
-        int child_shift = 63 - (depth + 1) * BITS_PER_LEVEL;
-        if (child_shift < 0) { // Guard against negative shift with large BITS_PER_LEVEL
-            child_shift = 0;
-        }
-
-        // We take the intersection of the query range and the node's range.
-        uint64_t effective_start = std::max(start, node_lower_bound);
-        uint64_t effective_end = std::min(end, node_upper_bound);
-
-        // Calculate start and end slot indices from the effective range.
-        uint64_t start_idx = (effective_start >> child_shift) & LEVEL_INDEX_MASK;
-        uint64_t end_idx = (effective_end >> child_shift) & LEVEL_INDEX_MASK;
-
-        for (uint64_t i = start_idx; i <= end_idx; ++i) {
-            uint64_t slot = node->slots[i];
-            if (slot == 0) continue;
-
-            if (slot & POINTER_TAG) {
-                // This is a child node (pointer).
-                uint64_t child_prefix = current_prefix | (i << child_shift);
-
-                // If the child is not on a boundary, it's fully contained in the range.
-                if (i > start_idx && i < end_idx) {
-                    dump_recursive(slot & OFFSET_MASK, depth + 1, results);
-                } else {
-                    // Child is on a boundary, so we do a partial scan.
-                    scan_recursive(slot & OFFSET_MASK, depth + 1, child_prefix, start, end, results);
-                }
-            } else {
-                // This is a key. Check if it's in the original query range.
-                uint64_t key = slot;
-                if (key >= start && key <= end) {
-                    results.push_back(key);
-                }
-            }
-        }
-    }
-};
-
-void run_benchmark(size_t num_keys, const std::string& key_type) {
-    const size_t SHT_MEM_SIZE = num_keys * 40;
-
-    std::cout << "\n\n--- Benchmark Run ---" << std::endl;
-    std::cout << "--- Configuration: " << num_keys << " keys, " << key_type << " distribution ---" << std::endl;
-
-    std::cout << "Preparing keys..." << std::endl;
+// Generates 1D keys, either sequential or random
+std::vector<uint64_t> generate_1d_keys(size_t num_keys, bool random) {
     std::vector<uint64_t> keys(num_keys);
-    std::iota(keys.begin(), keys.end(), 1);
-
-    std::mt19937_64 rng(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    if (key_type == "Random") {
+    std::iota(keys.begin(), keys.end(), 1); // Start from 1 to avoid 0
+    if (random) {
+        std::mt19937_64 rng(std::chrono::high_resolution_clock::now().time_since_epoch().count());
         std::shuffle(keys.begin(), keys.end(), rng);
     }
+    return keys;
+}
+
+// Generates n-dimensional keys
+template<uint32_t D>
+std::vector<std::array<uint64_t, D>> generate_nd_keys(size_t num_keys) {
+    std::vector<std::array<uint64_t, D>> keys(num_keys);
+    std::mt19937_64 rng(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    std::uniform_int_distribution<uint64_t> dist;
+    for (size_t i = 0; i < num_keys; ++i) {
+        for (uint32_t d = 0; d < D; ++d) {
+            keys[i][d] = dist(rng);
+        }
+    }
+    return keys;
+}
+
+// Simple helper to print benchmark headers
+void print_header(const std::string& title) {
+    std::cout << "\n" << std::string(70, '=') << "\n";
+    std::cout << "--- " << title << " ---\n";
+    std::cout << std::string(70, '-') << std::endl;
+}
+
+// =================================================================================================
+// --- 1D BENCHMARK (Lexicographical Heuristic) ---
+// =================================================================================================
+
+void run_benchmark_1d(size_t num_keys, bool is_random) {
+    const uint32_t D = 1;
+    const std::string key_type = is_random ? "Random" : "Sequential";
+    print_header("1D Benchmark (" + std::to_string(num_keys) + " keys, " + key_type + ")");
+
+    auto keys = generate_1d_keys(num_keys, is_random);
+    std::string value_str = "test_val";
+
+    // --- Setup StaxDimensionStore ---
+    std::atomic<uint32_t> root_ptr = 0;
+    NodeManager node_manager;
+    ValueStore value_store;
+    RecordManager record_manager(&value_store, D);
+    StaxDimensionStore<16> store(node_manager, record_manager, root_ptr, D, SplittingHeuristic::LEXICOGRAPHICAL);
 
     // --- Insert Benchmark ---
-    std::cout << "\n--- INSERTION ---" << std::endl;
-    // LayeredSlotMap
-    LayeredSlotMap sht(SHT_MEM_SIZE);
     auto start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        sht.insert(key);
+    for (const auto& key : keys) {
+        store.insert(&key, value_str);
     }
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_insert_sht = (double)duration.count() / num_keys;
-    std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_insert_sht << " ns/insert" << std::endl;
-
-    // std::unordered_map
-    std::unordered_map<uint64_t, bool> umap;
-    umap.reserve(num_keys);
-    start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        umap.insert({key, true});
-    }
-    end_time = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_insert_umap = (double)duration.count() / num_keys;
-    std::cout << "[std::unordered_map]  Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_insert_umap << " ns/insert" << std::endl;
-
+    double ns_per_op = (double)duration.count() / num_keys;
+    std::cout << "[INSERT] Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_op << " ns/op" << std::endl;
 
     // --- Get Benchmark ---
-    std::cout << "\n--- LOOKUP ---" << std::endl;
-    if (key_type == "Random") {
-        std::shuffle(keys.begin(), keys.end(), rng);
-    }
-    // LayeredSlotMap
     size_t found_count = 0;
     start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        if (sht.get(key)) {
+    for (const auto& key : keys) {
+        if (store.get(&key) != nullptr) {
             found_count++;
         }
     }
     end_time = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_get_sht = (double)duration.count() / num_keys;
-    std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_get_sht << " ns/get" << std::endl;
-    if (found_count != num_keys) std::cerr << "SHT GET VERIFICATION FAILED!" << std::endl;
+    ns_per_op = (double)duration.count() / num_keys;
+    std::cout << "[GET]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_op << " ns/op" << std::endl;
 
-    // std::unordered_map
-    found_count = 0;
-    start_time = std::chrono::high_resolution_clock::now();
-    for (uint64_t key : keys) {
-        if (umap.find(key) != umap.end()) {
-            found_count++;
-        }
-    }
-    end_time = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-    double ns_per_get_umap = (double)duration.count() / num_keys;
-    std::cout << "[std::unordered_map]  Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_get_umap << " ns/get" << std::endl;
-    if (found_count != num_keys) std::cerr << "UMAP GET VERIFICATION FAILED!" << std::endl;
-
-
-    // --- Scan Benchmark ---
-    const size_t SCAN_SIZE = 1000;
-    if (num_keys > SCAN_SIZE) {
-        std::uniform_int_distribution<uint64_t> dist(1, num_keys - SCAN_SIZE);
-        uint64_t scan_start = dist(rng);
-        uint64_t scan_end = scan_start + SCAN_SIZE - 1;
-
-        std::cout << "\n--- RANGE SCAN ---" << std::endl;
-        std::cout << "(std::unordered_map does not support this operation)" << std::endl;
-
-        start_time = std::chrono::high_resolution_clock::now();
-        std::vector<uint64_t> scan_results = sht.scan(scan_start, scan_end);
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        double ns_per_scan_key = scan_results.empty() ? 0 : (double)duration.count() / scan_results.size();
-
-        std::cout << "[LayeredSlotMap]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_scan_key << " ns/key (for a scan of " << scan_results.size() << " keys)" << std::endl;
-        if (scan_results.size() != SCAN_SIZE) std::cerr << "SHT SCAN VERIFICATION FAILED!" << std::endl;
+    if (found_count != num_keys) {
+        std::cerr << "  [ERROR] Verification failed! Found " << found_count << "/" << num_keys << " keys." << std::endl;
+    } else {
+        std::cout << "  [OK] Verification passed." << std::endl;
     }
 
-    // --- MEMORY USAGE ---
-    std::cout << "\n--- MEMORY USAGE ---" << std::endl;
-    // LayeredSlotMap
-    size_t mem_used_sht = sht.get_mem_usage();
-    std::cout << "[LayeredSlotMap]      Total (Actual):    " << mem_used_sht / (1024.0 * 1024.0) << " MB" << std::endl;
-    std::cout << "[LayeredSlotMap]      Per Key (Actual):  " << (double)mem_used_sht / num_keys << " bytes/key" << std::endl;
-
-    // std::unordered_map (Estimation)
-    // Formula: (nodes * (key + val + next_ptr)) + (buckets * ptr_size)
-    size_t node_size = sizeof(uint64_t) + sizeof(bool) + sizeof(void*); // Assumes typical node structure
-    size_t mem_used_umap = (umap.size() * node_size) + (umap.bucket_count() * sizeof(void*));
-    std::cout << "[std::unordered_map]  Total (Estimated): " << mem_used_umap / (1024.0 * 1024.0) << " MB" << std::endl;
-    std::cout << "[std::unordered_map]  Per Key (Estimated): " << (double)mem_used_umap / num_keys << " bytes/key" << std::endl;
-    std::cout << "----------------------------------------------------------" << std::endl;
+    // --- Memory Usage ---
+    size_t node_mem = node_manager.get_allocated_size();
+    size_t record_mem = record_manager.get_allocated_size();
+    size_t value_mem = value_store.get_allocated_size();
+    size_t total_mem = node_mem + record_mem + value_mem;
+    std::cout << "[MEMORY]   Total: " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB"
+              << " (" << (double)total_mem / num_keys << " bytes/key)" << std::endl;
 }
+
+// =================================================================================================
+// --- N-D BENCHMARK (Adaptive & K-Cyclic Heuristics) ---
+// =================================================================================================
+
+template<uint32_t D>
+void run_benchmark_nd(size_t num_keys, SplittingHeuristic heuristic) {
+    std::string heuristic_name = (heuristic == SplittingHeuristic::ADAPTIVE) ? "ADAPTIVE" : "K_DIMENSIONAL_CYCLIC";
+    print_header(std::to_string(D) + "D Benchmark (" + std::to_string(num_keys) + " keys, " + heuristic_name + ")");
+
+    auto keys = generate_nd_keys<D>(num_keys);
+    std::string value_str = "test_val";
+
+    // --- Setup StaxDimensionStore ---
+    std::atomic<uint32_t> root_ptr = 0;
+    NodeManager node_manager;
+    ValueStore value_store;
+    RecordManager record_manager(&value_store, D);
+    StaxDimensionStore<16> store(node_manager, record_manager, root_ptr, D, heuristic);
+
+    // --- Insert Benchmark ---
+    auto start_time = std::chrono::high_resolution_clock::now();
+    for (const auto& key : keys) {
+        store.insert(key.data(), value_str);
+    }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    double ns_per_op = (double)duration.count() / num_keys;
+    std::cout << "[INSERT] Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_op << " ns/op" << std::endl;
+
+    // --- Get Benchmark ---
+    size_t found_count = 0;
+    start_time = std::chrono::high_resolution_clock::now();
+    for (const auto& key : keys) {
+        if (store.get(key.data()) != nullptr) {
+            found_count++;
+        }
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    ns_per_op = (double)duration.count() / num_keys;
+    std::cout << "[GET]      Avg Latency: " << std::fixed << std::setprecision(2) << ns_per_op << " ns/op" << std::endl;
+
+    if (found_count != num_keys) {
+        std::cerr << "  [ERROR] Verification failed! Found " << found_count << "/" << num_keys << " keys." << std::endl;
+    } else {
+        std::cout << "  [OK] Verification passed." << std::endl;
+    }
+}
+
+// =================================================================================================
+// --- CONCURRENCY BENCHMARK ---
+// =================================================================================================
+
+void run_benchmark_threaded(size_t num_keys, unsigned int num_threads) {
+    const uint32_t D = 1;
+    print_header("Concurrency Benchmark (" + std::to_string(num_keys) + " keys, " + std::to_string(num_threads) + " threads)");
+
+    auto keys = generate_1d_keys(num_keys, true);
+    std::string value_str = "test_val";
+
+    // --- Setup StaxDimensionStore (shared across threads) ---
+    std::atomic<uint32_t> root_ptr = 0;
+    NodeManager node_manager;
+    ValueStore value_store;
+    RecordManager record_manager(&value_store, D);
+    StaxDimensionStore<16> store(node_manager, record_manager, root_ptr, D, SplittingHeuristic::LEXICOGRAPHICAL);
+
+    std::vector<std::thread> threads;
+    std::vector<std::vector<uint64_t>> thread_keys(num_threads);
+
+    // Distribute keys among threads
+    for (size_t i = 0; i < num_keys; ++i) {
+        thread_keys[i % num_threads].push_back(keys[i]);
+    }
+
+    // --- Insert Benchmark ---
+    auto start_time = std::chrono::high_resolution_clock::now();
+    for (unsigned int i = 0; i < num_threads; ++i) {
+        threads.emplace_back([&, i]() {
+            for (const auto& key : thread_keys[i]) {
+                store.insert(&key, value_str);
+            }
+        });
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    double ops_per_sec = (double)num_keys / (duration.count() / 1000.0);
+    std::cout << "[INSERT] Throughput: " << std::fixed << std::setprecision(0) << ops_per_sec << " ops/sec" << std::endl;
+
+    // --- Get Benchmark ---
+    threads.clear();
+    std::atomic<size_t> total_found = 0;
+    start_time = std::chrono::high_resolution_clock::now();
+    for (unsigned int i = 0; i < num_threads; ++i) {
+        threads.emplace_back([&, i]() {
+            size_t found_count = 0;
+            for (const auto& key : thread_keys[i]) {
+                if (store.get(&key) != nullptr) {
+                    found_count++;
+                }
+            }
+            total_found += found_count;
+        });
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    ops_per_sec = (double)num_keys / (duration.count() / 1000.0);
+    std::cout << "[GET]      Throughput: " << std::fixed << std::setprecision(0) << ops_per_sec << " ops/sec" << std::endl;
+
+    if (total_found != num_keys) {
+        std::cerr << "  [ERROR] Verification failed! Found " << total_found << "/" << num_keys << " keys." << std::endl;
+    } else {
+        std::cout << "  [OK] Verification passed." << std::endl;
+    }
+}
+
+
+// =================================================================================================
+// --- MAIN ---
+// =================================================================================================
 
 int main() {
     try {
-        const size_t ONE_MILLION = 1000000;
-        const size_t TEN_MILLION = 10000000;
-        const size_t TWENTY_MILLION = 20000000;
+        const size_t NUM_KEYS_SMALL = 100000;
+        const size_t NUM_KEYS_LARGE = 1000000;
+        const unsigned int NUM_THREADS = std::thread::hardware_concurrency();
 
-        run_benchmark(ONE_MILLION, "Random");
-        run_benchmark(ONE_MILLION, "Sequential");
+        std::cout << "StaxDimensionStore Benchmark Suite" << std::endl;
+        std::cout << "Detected " << NUM_THREADS << " hardware threads." << std::endl;
 
-        run_benchmark(TEN_MILLION, "Random");
-        run_benchmark(TEN_MILLION, "Sequential");
+        // --- 1D Benchmarks ---
+        run_benchmark_1d(NUM_KEYS_LARGE, false); // Sequential
+        run_benchmark_1d(NUM_KEYS_LARGE, true);  // Random
 
-        run_benchmark(TWENTY_MILLION, "Random");
-        run_benchmark(TWENTY_MILLION, "Sequential");
+        // --- N-D Benchmarks ---
+        const uint32_t D = 4;
+        run_benchmark_nd<D>(NUM_KEYS_SMALL, SplittingHeuristic::ADAPTIVE);
+        run_benchmark_nd<D>(NUM_KEYS_SMALL, SplittingHeuristic::K_DIMENSIONAL_CYCLIC);
+
+        // --- Concurrency Benchmarks ---
+        run_benchmark_threaded(NUM_KEYS_LARGE, NUM_THREADS);
 
     } catch (const std::exception& e) {
-        std::cerr << "An error occurred: " << e.what() << std::endl;
+        std::cerr << "\nAn error occurred: " << e.what() << std::endl;
         return 1;
     }
+    std::cout << "\n" << std::string(70, '=') << "\n";
+    std::cout << "Benchmark finished successfully." << std::endl;
     return 0;
 }

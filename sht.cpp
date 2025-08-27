@@ -258,6 +258,41 @@ public:
         }
         return false;
     }
+
+    std::vector<Record*> scan(const uint64_t* start_key, const uint64_t* end_key) {
+        std::vector<Record*> results;
+        scan_recursive(root_ptr_.load(std::memory_order_acquire), start_key, end_key, true, true, results);
+        return results;
+    }
+
+private:
+    void scan_recursive(uint32_t node_idx, const uint64_t* start_key, const uint64_t* end_key, bool tight_lower, bool tight_upper, std::vector<Record*>& results) {
+        if (!node_idx) return;
+
+        if (TaggedIndex::is_leaf(node_idx)) {
+            Record* rec = record_manager_.get_record(TaggedIndex::get_index(node_idx));
+            if (rec) {
+                if ((!tight_lower || memcmp(rec->coords, start_key, dim_ * sizeof(uint64_t)) >= 0) &&
+                    (!tight_upper || memcmp(rec->coords, end_key, dim_ * sizeof(uint64_t)) <= 0)) {
+                    results.push_back(rec);
+                }
+            }
+            return;
+        }
+
+        RadixNode<FANOUT>* node = node_manager_.get_node<FANOUT>(TaggedIndex::get_index(node_idx));
+        int start_nibble = tight_lower ? get_nibble(start_key, node->test_nibble_idx, dim_) : 0;
+        int end_nibble = tight_upper ? get_nibble(end_key, node->test_nibble_idx, dim_) : 15;
+
+        for (int i = start_nibble; i <= end_nibble; ++i) {
+            uint32_t child_idx = node->children[i].load(std::memory_order_acquire);
+            if (child_idx) {
+                bool next_tight_lower = tight_lower && (i == start_nibble);
+                bool next_tight_upper = tight_upper && (i == end_nibble);
+                scan_recursive(child_idx, start_key, end_key, next_tight_lower, next_tight_upper, results);
+            }
+        }
+    }
 };
 
 const int MAX_DIMS = 8;
@@ -310,11 +345,21 @@ void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const s
     std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/insert" << std::endl;
 
     std::cout << "\n--- HIT LATENCY (LOOKUP) ---" << std::endl;
+    size_t found_count = 0;
     start_time = std::chrono::high_resolution_clock::now();
-    for (size_t i = 0; i < num_keys; ++i) { tree.get(keys[i].coords); }
+    for (size_t i = 0; i < num_keys; ++i) {
+        if (tree.get(keys[i].coords)) {
+            found_count++;
+        }
+    }
     end_time = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
     std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
+    if (found_count == num_keys) {
+        std::cout << "  Verification: SUCCESS" << std::endl;
+    } else {
+        std::cout << "  Verification: FAILED (Found " << found_count << "/" << num_keys << ")" << std::endl;
+    }
 
     std::cout << "\n--- MISS LATENCY (LOOKUP) ---" << std::endl;
     start_time = std::chrono::high_resolution_clock::now();
@@ -327,6 +372,28 @@ void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const s
     size_t total_mem = nm.get_mem_usage() + rm.get_mem_usage();
     std::cout << "[KeyValueRadixTree] Total (Actual): " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB" << std::endl;
     std::cout << "[KeyValueRadixTree] Per Key (Actual): " << std::fixed << std::setprecision(2) << (double)total_mem / num_keys << " bytes/key" << std::endl;
+
+    if (key_type == "Sequential" && num_keys > 1000) {
+        std::cout << "\n--- RANGE SCAN ---" << std::endl;
+        const size_t scan_size = 1000;
+        size_t start_idx = num_keys / 4;
+        const uint64_t* start_key = keys[start_idx].coords;
+        const uint64_t* end_key = keys[start_idx + scan_size - 1].coords;
+
+        start_time = std::chrono::high_resolution_clock::now();
+        std::vector<Record*> scan_results = tree.scan(start_key, end_key);
+        end_time = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+
+        if (!scan_results.empty()) {
+            std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / scan_results.size() << " ns/key (" << scan_results.size() << " keys)" << std::endl;
+        } else {
+             std::cout << "[KeyValueRadixTree] Scan found no results." << std::endl;
+        }
+        if (scan_results.size() != scan_size) {
+            std::cerr << "  SCAN VERIFICATION FAILED! Expected " << scan_size << ", got " << scan_results.size() << std::endl;
+        }
+    }
 }
 
 int main() {

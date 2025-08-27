@@ -131,14 +131,42 @@ public:
         return block_idx;
     }
 
-    std::atomic<uint32_t>* get_block_ptr(int level, uint32_t block_idx) {
+    std::atomic<uint32_t>* get_block_ptr(int level, uint32_t block_idx) const {
         return reinterpret_cast<std::atomic<uint32_t>*>(block_pools_[level] + block_idx * block_sizes_bytes_[level]);
     }
 
-    std::atomic<uint32_t>* get_block_ptr(uint32_t tagged_node_ptr) {
+    std::atomic<uint32_t>* get_block_ptr(uint32_t tagged_node_ptr) const {
         int level = TaggedPtr::get_level(tagged_node_ptr);
         uint32_t index = TaggedPtr::get_node_index(tagged_node_ptr);
         return get_block_ptr(level, index);
+    }
+
+    size_t get_mem_usage() const {
+        size_t total_bytes = 0;
+        for (int i = 0; i < IHT::NUM_LEVELS; ++i) {
+            total_bytes += (next_block_idxs_[i].load() - 1) * block_sizes_bytes_[i];
+        }
+        return total_bytes;
+    }
+
+    std::pair<size_t, size_t> get_density_stats() const {
+        size_t total_slots = 0;
+        size_t filled_slots = 0;
+        for (int i = 0; i < IHT::NUM_LEVELS; ++i) {
+            size_t fanout = IHT::FANOUT_SEQUENCE[i];
+            uint32_t allocated_blocks = next_block_idxs_[i].load() - 1;
+            total_slots += allocated_blocks * fanout;
+
+            for (uint32_t j = 1; j <= allocated_blocks; ++j) {
+                std::atomic<uint32_t>* block = get_block_ptr(i, j);
+                for (size_t k = 0; k < fanout; ++k) {
+                    if (block[k].load(std::memory_order_relaxed) != 0) {
+                        filled_slots++;
+                    }
+                }
+            }
+        }
+        return {filled_slots, total_slots};
     }
 };
 
@@ -429,6 +457,58 @@ void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const s
     end_time = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
     std::cout << "[IHT] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
+
+    // --- Unordered Map Benchmark ---
+    std::cout << "\n--- std::unordered_map Benchmark (string key) ---" << std::endl;
+    std::unordered_map<std::string, uint64_t> umap;
+
+    // Insertion
+    start_time = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < num_keys; ++i) {
+        std::string key_str(reinterpret_cast<const char*>(keys[i].coords), dimensionality * sizeof(uint64_t));
+        umap[key_str] = i;
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/insert" << std::endl;
+
+    // Hit Latency
+    start_time = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < num_keys; ++i) {
+        std::string key_str(reinterpret_cast<const char*>(keys[i].coords), dimensionality * sizeof(uint64_t));
+        volatile auto it = umap.find(key_str);
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
+
+    // Miss Latency
+    start_time = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < num_keys; ++i) {
+        std::string key_str(reinterpret_cast<const char*>(miss_keys[i].coords), dimensionality * sizeof(uint64_t));
+        volatile auto it = umap.find(key_str);
+    }
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
+    std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
+
+    // --- MEMORY USAGE & DENSITY ---
+    std::cout << "\n--- IHT MEMORY USAGE & DENSITY ---" << std::endl;
+    size_t block_mem = ba.get_mem_usage();
+    size_t record_mem = rm.get_mem_usage();
+    size_t total_mem = block_mem + record_mem;
+    std::cout << "Block Allocator Memory: " << std::fixed << std::setprecision(2) << block_mem / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "Record Manager Memory:  " << std::fixed << std::setprecision(2) << record_mem / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "Total Memory (IHT):     " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB" << std::endl;
+    std::cout << "Average Bytes per Key:  " << std::fixed << std::setprecision(2) << (double)total_mem / num_keys << " bytes/key" << std::endl;
+
+    auto density_stats = ba.get_density_stats();
+    if (density_stats.second > 0) {
+        double density = (double)density_stats.first / density_stats.second * 100.0;
+        std::cout << "Pointer Block Density:  " << std::fixed << std::setprecision(2) << density << "% (" << density_stats.first << " / " << density_stats.second << " slots)" << std::endl;
+    } else {
+        std::cout << "Pointer Block Density:  N/A (no blocks allocated)" << std::endl;
+    }
 }
 
 int main(int argc, char* argv[]) {

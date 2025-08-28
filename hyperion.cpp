@@ -282,21 +282,52 @@ public:
             if (!bucket->is_full()) { if (bucket->append(record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType)))) return; goto restart; }
             else {
                 u32 new_rec_idx = record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType));
+
                 std::vector<const u64*> keys_in_bucket;
+                std::vector<u32> record_indices_in_bucket;
                 keys_in_bucket.reserve(LEAF_BUCKET_SIZE + 1);
+                record_indices_in_bucket.reserve(LEAF_BUCKET_SIZE + 1);
+
                 keys_in_bucket.push_back(coords);
-                for(uint8_t i = 0; i < bucket->count.load(std::memory_order_relaxed); ++i) keys_in_bucket.push_back(record_manager_.get_record(bucket->record_indices[i])->coords);
+                record_indices_in_bucket.push_back(new_rec_idx);
+
+                for(uint8_t i = 0; i < bucket->count.load(std::memory_order_relaxed); ++i) {
+                    u32 rec_idx = bucket->record_indices[i];
+                    keys_in_bucket.push_back(record_manager_.get_record(rec_idx)->coords);
+                    record_indices_in_bucket.push_back(rec_idx);
+                }
+
                 int diff_idx = find_first_differing_fragment_multi(keys_in_bucket, dim_);
-                if (diff_idx == -1) goto restart;
+                if (diff_idx == -1) {
+                    goto restart;
+                }
+
                 u32 new_node_idx = node_manager_.template allocate_node<NodeType>();
                 NodeType* new_node = node_manager_.template get_node<NodeType>(new_node_idx);
-                new_node->test_nibble_idx = diff_idx; new_node->representative_record_idx = new_rec_idx;
-                insert_recursive(coords, value, get_child_slot<true>(new_node, get_key_fragment(coords, diff_idx, dim_)));
-                for (uint8_t i = 0; i < bucket->count.load(std::memory_order_relaxed); ++i) {
-                    Record* reinsert_rec = record_manager_.get_record(bucket->record_indices[i]);
-                    insert_recursive(reinsert_rec->coords, reinsert_rec->value_or_offset, get_child_slot<true>(new_node, get_key_fragment(reinsert_rec->coords, diff_idx, dim_)));
+                new_node->test_nibble_idx = diff_idx;
+                new_node->representative_record_idx = new_rec_idx;
+
+                for (size_t i = 0; i < record_indices_in_bucket.size(); ++i) {
+                    u32 reinsert_rec_idx = record_indices_in_bucket[i];
+                    Record* reinsert_rec = record_manager_.get_record(reinsert_rec_idx);
+
+                    int frag = get_key_fragment(reinsert_rec->coords, diff_idx, dim_);
+                    std::atomic<u32>* child_slot = get_child_slot<true>(new_node, frag);
+
+                    u32 current_child_val = child_slot->load(std::memory_order_relaxed);
+                    if (current_child_val == 0) {
+                         u32 new_bucket_idx = bucket_manager_.template allocate_bucket<BucketType>();
+                         bucket_manager_.template get_bucket<BucketType>(new_bucket_idx)->append(reinsert_rec_idx);
+                         child_slot->store(TaggedIndex::make_bucket_idx(new_bucket_idx), std::memory_order_relaxed);
+                    } else if (TaggedIndex::is_bucket(current_child_val)) {
+                        bucket_manager_.template get_bucket<BucketType>(TaggedIndex::get_index(current_child_val))->append(reinsert_rec_idx);
+                    }
                 }
-                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+
+                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) {
+                    return;
+                }
+
                 goto restart;
             }
         }

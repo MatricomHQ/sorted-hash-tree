@@ -49,16 +49,13 @@ struct Record {
 namespace TaggedIndex {
     static constexpr u32 NODE_TAG = 0b00;
     static constexpr u32 LEAF_TAG = 0b10;
-    static constexpr u32 BUCKET_TAG = 0b11;
-    static constexpr u32 TAG_MASK = 0b11 << 30;
+    static constexpr u32 TAG_MASK = 0b11 << 30; // Reduced mask
     static constexpr u32 INDEX_MASK = ~TAG_MASK;
     inline u32 get_tag(u32 idx) { return (idx >> 30); }
     inline u32 get_index(u32 idx) { return idx & INDEX_MASK; }
     inline bool is_leaf(u32 idx) { return get_tag(idx) == LEAF_TAG; }
-    inline bool is_bucket(u32 idx) { return get_tag(idx) == BUCKET_TAG; }
     inline bool is_node(u32 idx) { return get_tag(idx) == NODE_TAG && idx != 0; }
     inline u32 make_leaf_idx(u32 rec_idx) { return (rec_idx & INDEX_MASK) | (LEAF_TAG << 30); }
-    inline u32 make_bucket_idx(u32 bucket_idx) { return (bucket_idx & INDEX_MASK) | (BUCKET_TAG << 30); }
     inline u32 make_node_idx(u32 node_idx) { return (node_idx & INDEX_MASK); }
 };
 
@@ -119,33 +116,6 @@ public:
     size_t get_mem_usage() const { return (size_t)next_page_idx_.load() * page_size_; }
 };
 
-template<size_t BUCKET_SIZE> struct LeafBucket { std::atomic<uint8_t> count{0}; u32 record_indices[BUCKET_SIZE]{0}; bool is_full() const { return count.load(std::memory_order_relaxed) >= BUCKET_SIZE; }
-    bool append(u32 record_idx) {
-        uint8_t c = count.load(std::memory_order_acquire);
-        while (c < BUCKET_SIZE) if (count.compare_exchange_weak(c, c + 1, std::memory_order_release, std::memory_order_relaxed)) { record_indices[c] = record_idx; return true; }
-        return false;
-    }
-};
-class LeafBucketManager {
-    std::atomic<u32> next_bucket_idx_{1};
-    uint8_t* bucket_pool_;
-    const size_t bucket_size_;
-    static constexpr u32 MAX_BUCKETS = 8 * 1024 * 1024;
-public:
-    LeafBucketManager(size_t bucket_size) : bucket_size_(bucket_size) {
-        bucket_pool_ = (uint8_t*)mmap(nullptr, (size_t)MAX_BUCKETS * bucket_size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (bucket_pool_ == MAP_FAILED) throw std::runtime_error("mmap failed for bucket pool");
-    }
-    ~LeafBucketManager() { munmap(bucket_pool_, (size_t)MAX_BUCKETS * bucket_size_); }
-    template<typename TBucket> TBucket* get_bucket(u32 idx) { return reinterpret_cast<TBucket*>(bucket_pool_ + (size_t)idx * bucket_size_); }
-    template<typename TBucket> u32 allocate_bucket() {
-        u32 idx = next_bucket_idx_.fetch_add(1, std::memory_order_relaxed);
-        if (idx >= MAX_BUCKETS) throw std::runtime_error("LeafBucket pool exhausted");
-        new (get_bucket<TBucket>(idx)) TBucket(); return idx;
-    }
-    size_t get_mem_usage() const { return (size_t)next_bucket_idx_.load() * bucket_size_; }
-};
-
 class RecordManager {
     std::atomic<u32> next_record_idx_{1};
     uint8_t* record_pool_;
@@ -175,24 +145,21 @@ struct MemoryContext {
     std::unique_ptr<NodeManager> nm;
     std::unique_ptr<RecordManager> rm;
     std::unique_ptr<PageManager> pm;
-    std::unique_ptr<LeafBucketManager> bm;
-    MemoryContext(size_t node_size, size_t page_size, size_t bucket_size, u32 dimensionality) {
+    MemoryContext(size_t node_size, size_t page_size, u32 dimensionality) {
         nm = std::make_unique<NodeManager>(node_size);
         rm = std::make_unique<RecordManager>(dimensionality);
         pm = std::make_unique<PageManager>(page_size);
-        bm = std::make_unique<LeafBucketManager>(bucket_size);
     }
     size_t get_mem_usage() const {
-        return nm->get_mem_usage() + rm->get_mem_usage() + bm->get_mem_usage() + pm->get_mem_usage();
+        return nm->get_mem_usage() + rm->get_mem_usage() + pm->get_mem_usage();
     }
 };
 
 // --- Radix Tree Core ---
-template<size_t FANOUT, size_t SLOTS_PER_PAGE, size_t LEAF_BUCKET_SIZE, typename ValueType>
+template<size_t FANOUT, size_t SLOTS_PER_PAGE, typename ValueType>
 class KeyValueRadixTree {
     using NodeType = RadixNode<FANOUT, SLOTS_PER_PAGE>;
-    using BucketType = LeafBucket<LEAF_BUCKET_SIZE>;
-    NodeManager& node_manager_; RecordManager& record_manager_; PageManager& page_manager_; LeafBucketManager& bucket_manager_;
+    NodeManager& node_manager_; RecordManager& record_manager_; PageManager& page_manager_;
     std::atomic<u32> root_ptr_{0};
     const u32 dim_;
 
@@ -206,15 +173,6 @@ class KeyValueRadixTree {
         for (int i = start_frag; i < max_frags; ++i) if (get_key_fragment(k1, i, d) != get_key_fragment(k2, i, d)) return i;
         return -1;
     }
-    static int find_first_differing_fragment_multi(const std::vector<const u64*>& keys, int d) {
-        if (keys.size() < 2) return -1;
-        int max_frags = d * (FANOUT == 16 ? 16 : 8);
-        for (int frag_idx = 0; frag_idx < max_frags; ++frag_idx) {
-            int first_frag = get_key_fragment(keys[0], frag_idx, d);
-            for (size_t i = 1; i < keys.size(); ++i) if (get_key_fragment(keys[i], frag_idx, d) != first_frag) return frag_idx;
-        }
-        return -1;
-    }
     void insert_into_new_node(NodeType* node, u32 record_idx, const u64* key, int diff_idx, u32 existing_tagged_idx) {
         const u64* existing_coords = nullptr;
         if (TaggedIndex::is_leaf(existing_tagged_idx)) existing_coords = record_manager_.get_record(TaggedIndex::get_index(existing_tagged_idx))->coords;
@@ -224,7 +182,7 @@ class KeyValueRadixTree {
         get_child_slot<true>(node, get_key_fragment(existing_coords, diff_idx, dim_))->store(existing_tagged_idx, std::memory_order_relaxed);
     }
 public:
-    KeyValueRadixTree(MemoryContext& ctx, u32 d) : node_manager_(*ctx.nm), record_manager_(*ctx.rm), page_manager_(*ctx.pm), bucket_manager_(*ctx.bm), dim_(d) {}
+    KeyValueRadixTree(MemoryContext& ctx, u32 d) : node_manager_(*ctx.nm), record_manager_(*ctx.rm), page_manager_(*ctx.pm), dim_(d) {}
 
     void insert(const u64* coords, ValueType value) {
         static_assert(sizeof(ValueType) <= sizeof(u64)); u64 val_u64 = 0; memcpy(&val_u64, &value, sizeof(ValueType));
@@ -252,84 +210,20 @@ public:
         }
         if (current_idx == 0) {
             u32 new_rec_idx = record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType));
-            u32 new_tagged_idx = (LEAF_BUCKET_SIZE > 1) ? TaggedIndex::make_bucket_idx(bucket_manager_.template allocate_bucket<BucketType>()) : TaggedIndex::make_leaf_idx(new_rec_idx);
-            if constexpr (LEAF_BUCKET_SIZE > 1) bucket_manager_.template get_bucket<BucketType>(TaggedIndex::get_index(new_tagged_idx))->append(new_rec_idx);
-            if (parent_slot->compare_exchange_strong(current_idx, new_tagged_idx, std::memory_order_release, std::memory_order_relaxed)) return;
+            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_release, std::memory_order_relaxed)) return;
             goto restart;
         }
         if (TaggedIndex::is_leaf(current_idx)) {
             Record* existing_rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
             if (memcmp(coords, existing_rec->coords, dim_ * sizeof(u64)) == 0) return;
             u32 new_rec_idx = record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType));
-            if constexpr (LEAF_BUCKET_SIZE > 1) {
-                u32 bucket_idx = bucket_manager_.template allocate_bucket<BucketType>();
-                BucketType* bucket = bucket_manager_.template get_bucket<BucketType>(bucket_idx);
-                bucket->append(TaggedIndex::get_index(current_idx)); bucket->append(new_rec_idx);
-                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_bucket_idx(bucket_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-            } else {
-                int diff_idx = find_first_differing_fragment(coords, existing_rec->coords, dim_);
-                u32 new_node_idx = node_manager_.template allocate_node<NodeType>();
-                NodeType* new_node = node_manager_.template get_node<NodeType>(new_node_idx);
-                new_node->test_nibble_idx = diff_idx; new_node->representative_record_idx = new_rec_idx;
-                insert_into_new_node(new_node, new_rec_idx, coords, diff_idx, current_idx);
-                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-            }
+            int diff_idx = find_first_differing_fragment(coords, existing_rec->coords, dim_);
+            u32 new_node_idx = node_manager_.template allocate_node<NodeType>();
+            NodeType* new_node = node_manager_.template get_node<NodeType>(new_node_idx);
+            new_node->test_nibble_idx = diff_idx; new_node->representative_record_idx = new_rec_idx;
+            insert_into_new_node(new_node, new_rec_idx, coords, diff_idx, current_idx);
+            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
             goto restart;
-        }
-        if (TaggedIndex::is_bucket(current_idx)) {
-            BucketType* bucket = bucket_manager_.template get_bucket<BucketType>(TaggedIndex::get_index(current_idx));
-            for (uint8_t i = 0; i < bucket->count.load(std::memory_order_relaxed); ++i) if (memcmp(coords, record_manager_.get_record(bucket->record_indices[i])->coords, dim_ * sizeof(u64)) == 0) return;
-            if (!bucket->is_full()) { if (bucket->append(record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType)))) return; goto restart; }
-            else {
-                u32 new_rec_idx = record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType));
-
-                std::vector<const u64*> keys_in_bucket;
-                std::vector<u32> record_indices_in_bucket;
-                keys_in_bucket.reserve(LEAF_BUCKET_SIZE + 1);
-                record_indices_in_bucket.reserve(LEAF_BUCKET_SIZE + 1);
-
-                keys_in_bucket.push_back(coords);
-                record_indices_in_bucket.push_back(new_rec_idx);
-
-                for(uint8_t i = 0; i < bucket->count.load(std::memory_order_relaxed); ++i) {
-                    u32 rec_idx = bucket->record_indices[i];
-                    keys_in_bucket.push_back(record_manager_.get_record(rec_idx)->coords);
-                    record_indices_in_bucket.push_back(rec_idx);
-                }
-
-                int diff_idx = find_first_differing_fragment_multi(keys_in_bucket, dim_);
-                if (diff_idx == -1) {
-                    goto restart;
-                }
-
-                u32 new_node_idx = node_manager_.template allocate_node<NodeType>();
-                NodeType* new_node = node_manager_.template get_node<NodeType>(new_node_idx);
-                new_node->test_nibble_idx = diff_idx;
-                new_node->representative_record_idx = new_rec_idx;
-
-                for (size_t i = 0; i < record_indices_in_bucket.size(); ++i) {
-                    u32 reinsert_rec_idx = record_indices_in_bucket[i];
-                    Record* reinsert_rec = record_manager_.get_record(reinsert_rec_idx);
-
-                    int frag = get_key_fragment(reinsert_rec->coords, diff_idx, dim_);
-                    std::atomic<u32>* child_slot = get_child_slot<true>(new_node, frag);
-
-                    u32 current_child_val = child_slot->load(std::memory_order_relaxed);
-                    if (current_child_val == 0) {
-                         u32 new_bucket_idx = bucket_manager_.template allocate_bucket<BucketType>();
-                         bucket_manager_.template get_bucket<BucketType>(new_bucket_idx)->append(reinsert_rec_idx);
-                         child_slot->store(TaggedIndex::make_bucket_idx(new_bucket_idx), std::memory_order_relaxed);
-                    } else if (TaggedIndex::is_bucket(current_child_val)) {
-                        bucket_manager_.template get_bucket<BucketType>(TaggedIndex::get_index(current_child_val))->append(reinsert_rec_idx);
-                    }
-                }
-
-                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) {
-                    return;
-                }
-
-                goto restart;
-            }
         }
     }
     std::optional<ValueType> get(const u64* coords) {
@@ -343,12 +237,6 @@ public:
         if (TaggedIndex::is_leaf(current_idx)) {
             Record* rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
             if (rec && memcmp(rec->coords, coords, dim_ * sizeof(u64)) == 0) { ValueType val; memcpy(&val, &rec->value_or_offset, sizeof(ValueType)); return val; }
-        } else if (TaggedIndex::is_bucket(current_idx)) {
-            BucketType* bucket = bucket_manager_.template get_bucket<BucketType>(TaggedIndex::get_index(current_idx));
-            for (uint8_t i = 0; i < bucket->count.load(std::memory_order_acquire); ++i) {
-                Record* rec = record_manager_.get_record(bucket->record_indices[i]);
-                if (memcmp(rec->coords, coords, dim_ * sizeof(u64)) == 0) { ValueType val; memcpy(&val, &rec->value_or_offset, sizeof(ValueType)); return val; }
-            }
         }
         return std::nullopt;
     }
@@ -369,17 +257,15 @@ private:
     }
 };
 
-template<size_t LEAF_BUCKET_SIZE>
 void run_benchmark(int dimensionality, const std::string& key_type) {
     const size_t NUM_KEYS = 2000000;
-    std::cout << "\n--- Flat Radix Tree Benchmark (DIM=" << dimensionality << ", BUCKET=" << LEAF_BUCKET_SIZE << ", " << key_type << ") ---" << std::endl;
+    std::cout << "\n--- Flat Radix Tree Benchmark (DIM=" << dimensionality << ", " << key_type << ") ---" << std::endl;
 
-    using TreeType = KeyValueRadixTree<256, 16, LEAF_BUCKET_SIZE, u64>;
+    using TreeType = KeyValueRadixTree<256, 16, u64>;
     using NodeType = RadixNode<256, 16>;
     using PageType = NodePage<16>;
-    using BucketType = LeafBucket<LEAF_BUCKET_SIZE>;
 
-    MemoryContext ctx(sizeof(NodeType), sizeof(PageType), sizeof(BucketType), dimensionality);
+    MemoryContext ctx(sizeof(NodeType), sizeof(PageType), dimensionality);
     TreeType tree(ctx, dimensionality);
 
     std::vector<std::vector<u64>> keys(NUM_KEYS, std::vector<u64>(dimensionality));
@@ -401,7 +287,6 @@ void run_benchmark(int dimensionality, const std::string& key_type) {
         }
     }
 
-
     auto start = std::chrono::high_resolution_clock::now();
     for (const auto& key : keys) {
         tree.insert(key.data(), (u64)key.data());
@@ -421,7 +306,6 @@ void run_benchmark(int dimensionality, const std::string& key_type) {
 
     size_t total_mem = ctx.get_mem_usage();
     std::cout << "[RadixTree] Memory: " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB (" << (double)total_mem / NUM_KEYS << " bytes/key)" << std::endl;
-
 
     // --- std::unordered_map Benchmark ---
     std::unordered_map<std::string, u64> map;
@@ -447,23 +331,17 @@ void run_benchmark(int dimensionality, const std::string& key_type) {
     size_t node_overhead = sizeof(void*) * 2; // Approximate overhead per node
     size_t map_mem = NUM_KEYS * (key_size + sizeof(u64) + string_obj_size + node_overhead);
     std::cout << "[std::unordered_map] Memory (est.): " << std::fixed << std::setprecision(2) << map_mem / (1024.0 * 1024.0) << " MB (" << (double)map_mem / NUM_KEYS << " bytes/key)" << std::endl;
-
 }
 
 int main() {
     try {
         std::vector<int> dims_to_test = {1, 3, 4, 8};
         std::vector<std::string> key_types_to_test = {"Random", "Sequential", "Clustered"};
-        std::vector<size_t> bucket_sizes_to_test = {1, 2, 4};
 
         for (int dims : dims_to_test) {
             for (const auto& key_type : key_types_to_test) {
                 if (dims == 1 && key_type == "Clustered") continue;
-                for (size_t bucket_size : bucket_sizes_to_test) {
-                    if (bucket_size == 1) run_benchmark<1>(dims, key_type);
-                    else if (bucket_size == 2) run_benchmark<2>(dims, key_type);
-                    else if (bucket_size == 4) run_benchmark<4>(dims, key_type);
-                }
+                run_benchmark(dims, key_type);
             }
         }
     } catch (const std::exception& e) {

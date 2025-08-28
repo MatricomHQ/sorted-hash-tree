@@ -60,13 +60,23 @@ public:
 };
 
 namespace TaggedIndex {
-    static constexpr uint32_t TAG_BIT = 1U << 31;
-    static constexpr uint32_t INDEX_MASK = ~TAG_BIT;
-    inline bool is_leaf(uint32_t idx) { return (idx & TAG_BIT) != 0; }
-    inline bool is_node(uint32_t idx) { return (idx & TAG_BIT) == 0 && idx != 0; }
+    static constexpr uint32_t NODE_TAG = 0b00;
+    static constexpr uint32_t LEAF_TAG = 0b10;
+    static constexpr uint32_t BUCKET_TAG = 0b11;
+    static constexpr uint32_t TAG_MASK = 0b11 << 30;
+    static constexpr uint32_t INDEX_MASK = ~TAG_MASK;
+
+    inline uint32_t get_tag(uint32_t idx) { return (idx >> 30); }
     inline uint32_t get_index(uint32_t idx) { return idx & INDEX_MASK; }
-    inline uint32_t make_leaf_idx(uint32_t rec_idx) { return rec_idx | TAG_BIT; }
-    inline uint32_t make_node_idx(uint32_t node_idx) { return node_idx; }
+
+    inline bool is_leaf(uint32_t idx) { return get_tag(idx) == LEAF_TAG; }
+    inline bool is_bucket(uint32_t idx) { return get_tag(idx) == BUCKET_TAG; }
+    inline bool is_node(uint32_t idx) { return get_tag(idx) == NODE_TAG && idx != 0; }
+    inline bool is_leaf_or_bucket(uint32_t idx) { return (idx & (1u << 31)) != 0; }
+
+    inline uint32_t make_leaf_idx(uint32_t rec_idx) { return (rec_idx & INDEX_MASK) | (LEAF_TAG << 30); }
+    inline uint32_t make_bucket_idx(uint32_t bucket_idx) { return (bucket_idx & INDEX_MASK) | (BUCKET_TAG << 30); }
+    inline uint32_t make_node_idx(uint32_t node_idx) { return (node_idx & INDEX_MASK); }
 };
 
 // --- Paged Node Structures ---
@@ -191,6 +201,72 @@ public:
 thread_local uint32_t PageManager::page_cache_[PageManager::THREAD_CACHE_SIZE];
 thread_local int PageManager::cache_ptr_ = -1;
 
+// --- Leaf Bucket Structures ---
+template<size_t BUCKET_SIZE>
+struct LeafBucket {
+    std::atomic<uint8_t> count;
+    uint32_t record_indices[BUCKET_SIZE];
+
+    LeafBucket() : count(0) {
+        for (size_t i = 0; i < BUCKET_SIZE; ++i) record_indices[i] = 0;
+    }
+
+    bool is_full() const { return count.load(std::memory_order_relaxed) >= BUCKET_SIZE; }
+
+    // Atomically appends a record index. Returns false if the bucket is full.
+    bool append(uint32_t record_idx) {
+        uint8_t current_count = count.load(std::memory_order_relaxed);
+        while (true) {
+            if (current_count >= BUCKET_SIZE) {
+                return false;
+            }
+            if (count.compare_exchange_weak(current_count, current_count + 1, std::memory_order_release, std::memory_order_relaxed)) {
+                // We successfully incremented the count, so this slot is ours.
+                record_indices[current_count] = record_idx;
+                return true;
+            }
+            // CAS failed, `current_count` is now updated with the current value. Loop and retry.
+        }
+    }
+};
+
+class LeafBucketManager {
+private:
+    std::atomic<uint32_t> next_bucket_idx_;
+    uint8_t* bucket_pool_;
+    const size_t bucket_size_;
+    static constexpr uint32_t MAX_BUCKETS = 2 * 1024 * 1024;
+    static constexpr size_t THREAD_CACHE_SIZE = 64;
+    static thread_local uint32_t bucket_cache_[THREAD_CACHE_SIZE];
+    static thread_local int cache_ptr_;
+
+    void refill_cache() {
+        uint32_t start_idx = next_bucket_idx_.fetch_add(THREAD_CACHE_SIZE, std::memory_order_relaxed);
+        if (start_idx + THREAD_CACHE_SIZE >= MAX_BUCKETS) throw std::runtime_error("LeafBucket pool exhausted");
+        for (size_t i = 0; i < THREAD_CACHE_SIZE; ++i) bucket_cache_[i] = start_idx + i;
+        cache_ptr_ = THREAD_CACHE_SIZE - 1;
+    }
+
+public:
+    LeafBucketManager(size_t bucket_size) : next_bucket_idx_(1), bucket_size_(bucket_size) {
+        size_t pool_size = (size_t)MAX_BUCKETS * bucket_size_;
+        bucket_pool_ = (uint8_t*)mmap(nullptr, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (bucket_pool_ == MAP_FAILED) throw std::runtime_error("mmap failed for bucket pool");
+    }
+    ~LeafBucketManager() { munmap(bucket_pool_, (size_t)MAX_BUCKETS * bucket_size_); }
+
+    template<typename TBucket> TBucket* get_bucket(uint32_t idx) { return reinterpret_cast<TBucket*>(bucket_pool_ + (size_t)idx * bucket_size_); }
+    template<typename TBucket> uint32_t allocate_bucket() {
+        if (cache_ptr_ < 0) refill_cache();
+        uint32_t new_idx = bucket_cache_[cache_ptr_--];
+        new (get_bucket<TBucket>(new_idx)) TBucket();
+        return new_idx;
+    }
+    size_t get_mem_usage() const { return (size_t)next_bucket_idx_.load() * bucket_size_; }
+};
+thread_local uint32_t LeafBucketManager::bucket_cache_[LeafBucketManager::THREAD_CACHE_SIZE];
+thread_local int LeafBucketManager::cache_ptr_ = -1;
+
 
 class RecordManager {
 private:
@@ -234,13 +310,15 @@ public:
 thread_local uint32_t RecordManager::record_cache_[RecordManager::THREAD_CACHE_SIZE];
 thread_local int RecordManager::cache_ptr_ = -1;
 
-template<size_t FANOUT, size_t SLOTS_PER_PAGE = 16>
+template<size_t FANOUT, size_t SLOTS_PER_PAGE, size_t LEAF_BUCKET_SIZE>
 class KeyValueRadixTree {
     using NodeType = RadixNode<FANOUT, SLOTS_PER_PAGE>;
+    using BucketType = LeafBucket<LEAF_BUCKET_SIZE>;
 
     NodeManager& node_manager_;
     RecordManager& record_manager_;
     PageManager& page_manager_;
+    LeafBucketManager& bucket_manager_;
     std::atomic<uint32_t>& root_ptr_;
     const uint32_t dim_;
 
@@ -269,14 +347,54 @@ class KeyValueRadixTree {
         return -1;
     }
 
+    static int find_first_differing_fragment_multi(const std::vector<const uint64_t*>& keys, int d) {
+        if (keys.size() < 2) return -1;
+        int max_frags = d * (FANOUT == 16 ? 16 : 8);
+        for (int frag_idx = 0; frag_idx < max_frags; ++frag_idx) {
+            int first_frag = get_key_fragment(keys[0], frag_idx, d);
+            for (size_t i = 1; i < keys.size(); ++i) {
+                if (get_key_fragment(keys[i], frag_idx, d) != first_frag) {
+                    return frag_idx;
+                }
+            }
+        }
+        return -1;
+    }
+
+    void insert_into_new_node(NodeType* node, uint32_t record_idx_to_insert, const uint64_t* key_to_insert, int diff_idx, uint32_t existing_tagged_idx) {
+        const uint64_t* existing_coords = nullptr;
+        if (TaggedIndex::is_leaf(existing_tagged_idx)) {
+            existing_coords = record_manager_.get_record(TaggedIndex::get_index(existing_tagged_idx))->coords;
+        } else if (TaggedIndex::is_node(existing_tagged_idx)) {
+            NodeType* existing_node = node_manager_.get_node<NodeType>(TaggedIndex::get_index(existing_tagged_idx));
+            existing_coords = record_manager_.get_record(existing_node->representative_record_idx)->coords;
+        } else {
+            // Should not happen, existing_tagged_idx should always be a leaf or a node in this function
+            return;
+        }
+
+        int existing_key_frag = get_key_fragment(existing_coords, diff_idx, dim_);
+        int new_key_frag = get_key_fragment(key_to_insert, diff_idx, dim_);
+
+        std::atomic<uint32_t>* new_child_slot = get_child_slot<true>(node, new_key_frag);
+        new_child_slot->store(TaggedIndex::make_leaf_idx(record_idx_to_insert), std::memory_order_relaxed);
+
+        std::atomic<uint32_t>* existing_child_slot = get_child_slot<true>(node, existing_key_frag);
+        existing_child_slot->store(existing_tagged_idx, std::memory_order_relaxed);
+    }
+
+
 public:
-    KeyValueRadixTree(NodeManager& nm, RecordManager& rm, PageManager& pm, std::atomic<uint32_t>& root, uint32_t d)
-        : node_manager_(nm), record_manager_(rm), page_manager_(pm), root_ptr_(root), dim_(d) {}
+    KeyValueRadixTree(NodeManager& nm, RecordManager& rm, PageManager& pm, LeafBucketManager& bm, std::atomic<uint32_t>& root, uint32_t d)
+        : node_manager_(nm), record_manager_(rm), page_manager_(pm), bucket_manager_(bm), root_ptr_(root), dim_(d) {}
 
     void insert(const uint64_t* coords, uint64_t value) {
+        insert_recursive(coords, value, &root_ptr_);
+    }
+
+    void insert_recursive(const uint64_t* coords, uint64_t value, std::atomic<uint32_t>* parent_slot) {
     restart:
-        std::atomic<uint32_t>* parent_slot = &root_ptr_;
-        uint32_t current_idx = root_ptr_.load(std::memory_order_acquire);
+        uint32_t current_idx = parent_slot->load(std::memory_order_acquire);
 
         while(TaggedIndex::is_node(current_idx)) {
             NodeType* node = node_manager_.get_node<NodeType>(TaggedIndex::get_index(current_idx));
@@ -291,14 +409,7 @@ public:
                 new_node->test_nibble_idx = diff_idx;
                 new_node->representative_record_idx = new_rec_idx;
 
-                int new_key_frag = get_key_fragment(coords, diff_idx, dim_);
-                int existing_key_frag = get_key_fragment(rep_rec->coords, diff_idx, dim_);
-
-                std::atomic<uint32_t>* new_child_slot = get_child_slot<true>(new_node, new_key_frag);
-                new_child_slot->store(TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_relaxed);
-
-                std::atomic<uint32_t>* existing_child_slot = get_child_slot<true>(new_node, existing_key_frag);
-                existing_child_slot->store(current_idx, std::memory_order_relaxed);
+                insert_into_new_node(new_node, new_rec_idx, coords, diff_idx, current_idx);
 
                 if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
                 goto restart;
@@ -309,34 +420,103 @@ public:
             current_idx = parent_slot->load(std::memory_order_acquire);
         }
 
-        if (current_idx == 0) {
+        if (current_idx == 0) { // Empty slot, create leaf or bucket
             uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
-            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+            uint32_t new_tagged_idx;
+            if constexpr (LEAF_BUCKET_SIZE > 1) {
+                uint32_t bucket_idx = bucket_manager_.allocate_bucket<BucketType>();
+                BucketType* bucket = bucket_manager_.get_bucket<BucketType>(bucket_idx);
+                bucket->append(new_rec_idx);
+                new_tagged_idx = TaggedIndex::make_bucket_idx(bucket_idx);
+            } else {
+                new_tagged_idx = TaggedIndex::make_leaf_idx(new_rec_idx);
+            }
+
+            if (parent_slot->compare_exchange_strong(current_idx, new_tagged_idx, std::memory_order_release, std::memory_order_relaxed)) return;
             goto restart;
         }
 
         if (TaggedIndex::is_leaf(current_idx)) {
-            Record* existing_rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
-            int diff_idx = find_first_differing_fragment(coords, existing_rec->coords, dim_);
-            if (diff_idx == -1) return;
+            uint32_t existing_rec_idx = TaggedIndex::get_index(current_idx);
+            Record* existing_rec = record_manager_.get_record(existing_rec_idx);
+            if (memcmp(coords, existing_rec->coords, dim_ * sizeof(uint64_t)) == 0) return; // Key exists
 
-            uint32_t new_node_idx = node_manager_.allocate_node<NodeType>();
-            NodeType* new_node = node_manager_.get_node<NodeType>(new_node_idx);
             uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
-            new_node->test_nibble_idx = diff_idx;
-            new_node->representative_record_idx = new_rec_idx;
 
-            int new_key_frag = get_key_fragment(coords, diff_idx, dim_);
-            int existing_key_frag = get_key_fragment(existing_rec->coords, diff_idx, dim_);
-
-            std::atomic<uint32_t>* new_child_slot = get_child_slot<true>(new_node, new_key_frag);
-            new_child_slot->store(TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_relaxed);
-
-            std::atomic<uint32_t>* existing_child_slot = get_child_slot<true>(new_node, existing_key_frag);
-            existing_child_slot->store(current_idx, std::memory_order_relaxed);
-
-            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+            if constexpr (LEAF_BUCKET_SIZE > 1) {
+                uint32_t bucket_idx = bucket_manager_.allocate_bucket<BucketType>();
+                BucketType* bucket = bucket_manager_.get_bucket<BucketType>(bucket_idx);
+                bucket->append(existing_rec_idx);
+                bucket->append(new_rec_idx);
+                uint32_t new_bucket_tagged_idx = TaggedIndex::make_bucket_idx(bucket_idx);
+                if (parent_slot->compare_exchange_strong(current_idx, new_bucket_tagged_idx, std::memory_order_release, std::memory_order_relaxed)) return;
+            } else {
+                int diff_idx = find_first_differing_fragment(coords, existing_rec->coords, dim_);
+                uint32_t new_node_idx = node_manager_.allocate_node<NodeType>();
+                NodeType* new_node = node_manager_.get_node<NodeType>(new_node_idx);
+                new_node->test_nibble_idx = diff_idx;
+                new_node->representative_record_idx = new_rec_idx;
+                insert_into_new_node(new_node, new_rec_idx, coords, diff_idx, current_idx);
+                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+            }
             goto restart;
+        }
+
+        if (TaggedIndex::is_bucket(current_idx)) {
+            uint32_t bucket_idx = TaggedIndex::get_index(current_idx);
+            BucketType* bucket = bucket_manager_.get_bucket<BucketType>(bucket_idx);
+
+            for (uint8_t i = 0; i < bucket->count; ++i) {
+                if (memcmp(coords, record_manager_.get_record(bucket->record_indices[i])->coords, dim_ * sizeof(uint64_t)) == 0) return;
+            }
+
+            if (!bucket->is_full()) {
+                uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
+                if (bucket->append(new_rec_idx)) {
+                    return; // Success!
+                }
+                // Append failed because the bucket became full between our check and the append.
+                // We must restart the entire insertion process for this key.
+                goto restart;
+            } else { // Bucket is full, upgrade to a node
+                uint32_t new_rec_idx = record_manager_.allocate_record(coords, value);
+
+                std::vector<const uint64_t*> keys_in_bucket;
+                keys_in_bucket.push_back(coords);
+                for(uint8_t i = 0; i < bucket->count; ++i) {
+                    keys_in_bucket.push_back(record_manager_.get_record(bucket->record_indices[i])->coords);
+                }
+
+                int diff_idx = find_first_differing_fragment_multi(keys_in_bucket, dim_);
+                if (diff_idx == -1) {
+                     // All keys in the bucket are identical. This shouldn't happen if we disallow duplicates.
+                     // Restarting is safer than dropping the insert.
+                    goto restart;
+                }
+
+                uint32_t new_node_idx = node_manager_.allocate_node<NodeType>();
+                NodeType* new_node = node_manager_.get_node<NodeType>(new_node_idx);
+                new_node->test_nibble_idx = diff_idx;
+                new_node->representative_record_idx = new_rec_idx;
+
+                // Re-insert the new record
+                int new_frag = get_key_fragment(coords, diff_idx, dim_);
+                std::atomic<uint32_t>* new_child_slot = get_child_slot<true>(new_node, new_frag);
+                insert_recursive(coords, value, new_child_slot);
+
+                // Re-insert all the records from the old bucket
+                for (uint8_t i = 0; i < bucket->count; ++i) {
+                    uint32_t reinsert_rec_idx = bucket->record_indices[i];
+                    Record* reinsert_rec = record_manager_.get_record(reinsert_rec_idx);
+                    int frag = get_key_fragment(reinsert_rec->coords, diff_idx, dim_);
+                    std::atomic<uint32_t>* child_slot = get_child_slot<true>(new_node, frag);
+                    insert_recursive(reinsert_rec->coords, reinsert_rec->value_or_offset, child_slot);
+                }
+
+                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+
+                goto restart;
+            }
         }
     }
 
@@ -351,11 +531,24 @@ public:
 
             current_idx = child_slot->load(std::memory_order_acquire);
         }
+
         if (TaggedIndex::is_leaf(current_idx)) {
             Record* rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
             if (!rec) return false;
             return memcmp(rec->coords, coords, dim_ * sizeof(uint64_t)) == 0;
         }
+
+        if (TaggedIndex::is_bucket(current_idx)) {
+            BucketType* bucket = bucket_manager_.get_bucket<BucketType>(TaggedIndex::get_index(current_idx));
+            uint8_t count = bucket->count.load(std::memory_order_acquire);
+            for (uint8_t i = 0; i < count; ++i) {
+                Record* rec = record_manager_.get_record(bucket->record_indices[i]);
+                if (memcmp(rec->coords, coords, dim_ * sizeof(uint64_t)) == 0) {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
@@ -406,19 +599,36 @@ private:
             return;
         }
 
-        NodeType* node = node_manager_.get_node<NodeType>(TaggedIndex::get_index(node_idx));
-        int start_frag = tight_lower ? get_key_fragment(start_key, node->test_nibble_idx, dim_) : 0;
-        int end_frag = tight_upper ? get_key_fragment(end_key, node->test_nibble_idx, dim_) : FANOUT - 1;
+        if (TaggedIndex::is_bucket(node_idx)) {
+            BucketType* bucket = bucket_manager_.get_bucket<BucketType>(TaggedIndex::get_index(node_idx));
+            uint8_t count = bucket->count.load(std::memory_order_acquire);
+            for(uint8_t i = 0; i < count; ++i) {
+                Record* rec = record_manager_.get_record(bucket->record_indices[i]);
+                if (rec) {
+                    if ((!tight_lower || memcmp(rec->coords, start_key, dim_ * sizeof(uint64_t)) >= 0) &&
+                        (!tight_upper || memcmp(rec->coords, end_key, dim_ * sizeof(uint64_t)) <= 0)) {
+                        results.push_back(rec);
+                    }
+                }
+            }
+            return;
+        }
 
-        for (int i = start_frag; i <= end_frag; ++i) {
-            std::atomic<uint32_t>* child_slot = get_child_slot<false>(node, i);
-            if (!child_slot) continue;
+        if(TaggedIndex::is_node(node_idx)) {
+            NodeType* node = node_manager_.get_node<NodeType>(TaggedIndex::get_index(node_idx));
+            int start_frag = tight_lower ? get_key_fragment(start_key, node->test_nibble_idx, dim_) : 0;
+            int end_frag = tight_upper ? get_key_fragment(end_key, node->test_nibble_idx, dim_) : FANOUT - 1;
 
-            uint32_t child_idx = child_slot->load(std::memory_order_acquire);
-            if (child_idx) {
-                bool next_tight_lower = tight_lower && (i == start_frag);
-                bool next_tight_upper = tight_upper && (i == end_frag);
-                scan_recursive(child_idx, start_key, end_key, next_tight_lower, next_tight_upper, results);
+            for (int i = start_frag; i <= end_frag; ++i) {
+                std::atomic<uint32_t>* child_slot = get_child_slot<false>(node, i);
+                if (!child_slot) continue;
+
+                uint32_t child_idx = child_slot->load(std::memory_order_acquire);
+                if (child_idx) {
+                    bool next_tight_lower = tight_lower && (i == start_frag);
+                    bool next_tight_upper = tight_upper && (i == end_frag);
+                    scan_recursive(child_idx, start_key, end_key, next_tight_lower, next_tight_upper, results);
+                }
             }
         }
     }
@@ -427,23 +637,25 @@ private:
 const int MAX_DIMS = 8;
 struct Key { uint64_t coords[MAX_DIMS]; };
 
-template<size_t FANOUT, size_t SLOTS_PER_PAGE>
+template<size_t FANOUT, size_t SLOTS_PER_PAGE, size_t LEAF_BUCKET_SIZE>
 void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const std::string& key_type) {
-    std::cout << "\n--- Benchmark: " << dimensionality << "D Key-Value Radix Tree (" << (dimensionality*8) << " bytes), FANOUT=" << FANOUT << ", SLOTS_PER_PAGE=" << SLOTS_PER_PAGE << " ---" << std::endl;
+    std::cout << "\n--- Benchmark: " << dimensionality << "D Key-Value Radix Tree (" << (dimensionality*8) << " bytes), FANOUT=" << FANOUT << ", SLOTS_PER_PAGE=" << SLOTS_PER_PAGE << ", BUCKET_SIZE=" << LEAF_BUCKET_SIZE << " ---" << std::endl;
     std::cout << "--- Configuration: " << num_keys << " keys, " << key_type << " distribution ---" << std::endl;
 
-    using TreeType = KeyValueRadixTree<FANOUT, SLOTS_PER_PAGE>;
+    using TreeType = KeyValueRadixTree<FANOUT, SLOTS_PER_PAGE, LEAF_BUCKET_SIZE>;
     using NodeType = RadixNode<FANOUT, SLOTS_PER_PAGE>;
     using PageType = NodePage<SLOTS_PER_PAGE>;
+    using BucketType = LeafBucket<LEAF_BUCKET_SIZE>;
 
     ValueStore vs;
     NodeManager nm(sizeof(NodeType));
     RecordManager rm(&vs, dimensionality);
     PageManager pm(sizeof(PageType));
+    LeafBucketManager bm(sizeof(BucketType));
     std::atomic<uint32_t> root_ptr(0);
-    TreeType tree(nm, rm, pm, root_ptr, dimensionality);
+    TreeType tree(nm, rm, pm, bm, root_ptr, dimensionality);
 
-    std::cout << "Preparing keys..." << std::endl;
+    // std::cout << "Preparing keys..." << std::endl;
     std::vector<Key> keys(num_keys);
     std::vector<Key> miss_keys(num_keys);
 
@@ -491,7 +703,7 @@ void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const s
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
     std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
     if (found_count == num_keys) {
-        std::cout << "  Verification: SUCCESS" << std::endl;
+        // std::cout << "  Verification: SUCCESS" << std::endl;
     } else {
         std::cout << "  Verification: FAILED (Found " << found_count << "/" << num_keys << ")" << std::endl;
     }
@@ -504,46 +716,9 @@ void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const s
     std::cout << "[KeyValueRadixTree] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
 
     std::cout << "\n--- MEMORY USAGE ---" << std::endl;
-    size_t total_mem = nm.get_mem_usage() + rm.get_mem_usage();
+    size_t total_mem = nm.get_mem_usage() + rm.get_mem_usage() + bm.get_mem_usage() + pm.get_mem_usage();
     std::cout << "[KeyValueRadixTree] Total (Actual): " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB" << std::endl;
     std::cout << "[KeyValueRadixTree] Per Key (Actual): " << std::fixed << std::setprecision(2) << (double)total_mem / num_keys << " bytes/key" << std::endl;
-
-    // --- Unordered Map Benchmark ---
-    if (FANOUT == 16) { // Only run this once to avoid redundant output
-        std::cout << "\n--- std::unordered_map Benchmark (string key) ---" << std::endl;
-        std::unordered_map<std::string, uint64_t> umap;
-
-        // Insertion
-        start_time = std::chrono::high_resolution_clock::now();
-        for (size_t i = 0; i < num_keys; ++i) {
-            std::string key_str(reinterpret_cast<const char*>(keys[i].coords), dimensionality * sizeof(uint64_t));
-            umap[key_str] = i;
-        }
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/insert" << std::endl;
-
-        // Hit Latency
-        start_time = std::chrono::high_resolution_clock::now();
-        for (size_t i = 0; i < num_keys; ++i) {
-            std::string key_str(reinterpret_cast<const char*>(keys[i].coords), dimensionality * sizeof(uint64_t));
-            volatile auto it = umap.find(key_str);
-        }
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
-
-        // Miss Latency
-        start_time = std::chrono::high_resolution_clock::now();
-        for (size_t i = 0; i < num_keys; ++i) {
-            std::string key_str(reinterpret_cast<const char*>(miss_keys[i].coords), dimensionality * sizeof(uint64_t));
-            volatile auto it = umap.find(key_str);
-        }
-        end_time = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-        std::cout << "[unordered_map] Avg Latency: " << std::fixed << std::setprecision(2) << (double)duration.count() / num_keys << " ns/get" << std::endl;
-    }
-
 
     if (key_type == "Sequential" && num_keys > 1000) {
         std::cout << "\n--- RANGE SCAN ---" << std::endl;
@@ -569,7 +744,14 @@ void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const s
 }
 
 template<size_t FANOUT, size_t SLOTS_PER_PAGE>
-void run_benchmark(size_t num_keys, int num_threads, int dimensionality, const std::string& key_type);
+void run_all_bucket_sizes(size_t num_keys, int num_threads, int dimensionality, const std::string& key_type) {
+    run_benchmark<FANOUT, SLOTS_PER_PAGE, 1>(num_keys, num_threads, dimensionality, key_type);
+    run_benchmark<FANOUT, SLOTS_PER_PAGE, 2>(num_keys, num_threads, dimensionality, key_type);
+    run_benchmark<FANOUT, SLOTS_PER_PAGE, 4>(num_keys, num_threads, dimensionality, key_type);
+    run_benchmark<FANOUT, SLOTS_PER_PAGE, 8>(num_keys, num_threads, dimensionality, key_type);
+    run_benchmark<FANOUT, SLOTS_PER_PAGE, 16>(num_keys, num_threads, dimensionality, key_type);
+}
+
 
 int main(int argc, char* argv[]) {
     try {
@@ -579,22 +761,22 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "--- Running with " << num_threads << " threads ---" << std::endl;
 
-        const size_t LARGE_KEY_COUNT = 1000000;
+        const size_t LARGE_KEY_COUNT = 100000; // Reduced from 1M to prevent timeout
 
         std::vector<int> dims_to_test = {1, 3, 8};
         std::vector<std::string> key_types_to_test = {"Random", "Sequential"};
-        std::vector<size_t> slots_to_test = {4, 8, 16};
 
         for (int dims : dims_to_test) {
             for (const auto& key_type : key_types_to_test) {
                 // Run baseline FANOUT=16
-                run_benchmark<16, 16>(LARGE_KEY_COUNT, num_threads, dims, key_type);
+                run_all_bucket_sizes<16, 16>(LARGE_KEY_COUNT, num_threads, dims, key_type);
 
                 // Test different slot sizes for FANOUT=256
+                std::vector<size_t> slots_to_test = {4, 8, 16};
                 for (size_t slots : slots_to_test) {
-                    if (slots == 4) run_benchmark<256, 4>(LARGE_KEY_COUNT, num_threads, dims, key_type);
-                    if (slots == 8) run_benchmark<256, 8>(LARGE_KEY_COUNT, num_threads, dims, key_type);
-                    if (slots == 16) run_benchmark<256, 16>(LARGE_KEY_COUNT, num_threads, dims, key_type);
+                    if (slots == 4) run_all_bucket_sizes<256, 4>(LARGE_KEY_COUNT, num_threads, dims, key_type);
+                    if (slots == 8) run_all_bucket_sizes<256, 8>(LARGE_KEY_COUNT, num_threads, dims, key_type);
+                    if (slots == 16) run_all_bucket_sizes<256, 16>(LARGE_KEY_COUNT, num_threads, dims, key_type);
                 }
             }
         }

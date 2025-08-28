@@ -1,0 +1,2101 @@
+--- Running with 4 threads ---
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 86.03 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 81.37 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 70.57 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 5.14 MB
+[KeyValueRadixTree] Per Key (Actual): 53.87 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 113.34 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 125.86 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 67.92 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 5.96 MB
+[KeyValueRadixTree] Per Key (Actual): 62.48 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 97.38 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 114.44 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 54.66 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.56 MB
+[KeyValueRadixTree] Per Key (Actual): 47.83 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 86.92 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 120.98 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 54.19 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 5.46 MB
+[KeyValueRadixTree] Per Key (Actual): 57.30 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 99.48 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 131.87 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 51.55 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.76 MB
+[KeyValueRadixTree] Per Key (Actual): 81.40 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 100.46 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 105.95 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 67.07 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 18.64 MB
+[KeyValueRadixTree] Per Key (Actual): 195.48 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 90.49 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 113.09 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 53.97 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.88 MB
+[KeyValueRadixTree] Per Key (Actual): 124.52 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 58.82 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 81.57 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.78 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.73 MB
+[KeyValueRadixTree] Per Key (Actual): 49.59 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 56.76 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 78.13 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.64 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.61 MB
+[KeyValueRadixTree] Per Key (Actual): 48.33 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 62.94 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 83.76 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.85 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.26 MB
+[KeyValueRadixTree] Per Key (Actual): 65.68 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 76.48 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 97.84 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 62.07 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 12.43 MB
+[KeyValueRadixTree] Per Key (Actual): 130.34 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 86.90 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 107.12 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 48.98 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.28 MB
+[KeyValueRadixTree] Per Key (Actual): 97.26 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 57.36 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 75.00 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.33 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.47 MB
+[KeyValueRadixTree] Per Key (Actual): 46.88 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 53.68 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 76.15 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 32.13 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.52 MB
+[KeyValueRadixTree] Per Key (Actual): 47.39 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 59.30 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 79.87 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 35.04 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.16 MB
+[KeyValueRadixTree] Per Key (Actual): 64.55 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 69.90 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 93.58 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 54.00 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.96 MB
+[KeyValueRadixTree] Per Key (Actual): 114.90 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 81.13 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 101.15 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 44.64 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.87 MB
+[KeyValueRadixTree] Per Key (Actual): 92.98 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 57.19 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 75.25 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 32.20 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.43 MB
+[KeyValueRadixTree] Per Key (Actual): 46.50 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 54.73 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 74.30 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 31.10 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.46 MB
+[KeyValueRadixTree] Per Key (Actual): 46.74 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 57.19 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 79.47 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 32.81 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.12 MB
+[KeyValueRadixTree] Per Key (Actual): 64.14 bytes/key
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 57.67 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.46 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.57 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 2.82 MB
+[KeyValueRadixTree] Per Key (Actual): 29.55 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 31.60 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 66.01 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 46.73 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.88 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.46 MB
+[KeyValueRadixTree] Per Key (Actual): 46.82 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 20.35 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 69.64 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 49.61 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.23 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 5.56 MB
+[KeyValueRadixTree] Per Key (Actual): 58.35 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 20.20 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 84.65 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 53.76 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.19 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.76 MB
+[KeyValueRadixTree] Per Key (Actual): 81.36 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 25.48 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 59.41 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 93.35 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.81 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 2.91 MB
+[KeyValueRadixTree] Per Key (Actual): 30.56 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 11.78 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 32.77 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 30.06 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.15 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 2.93 MB
+[KeyValueRadixTree] Per Key (Actual): 30.75 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 18.61 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 41.03 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.87 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.33 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.11 MB
+[KeyValueRadixTree] Per Key (Actual): 43.13 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 20.01 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 44.74 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.73 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.24 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.90 MB
+[KeyValueRadixTree] Per Key (Actual): 51.36 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.60 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 47.02 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.00 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.96 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.47 MB
+[KeyValueRadixTree] Per Key (Actual): 67.83 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.13 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 53.46 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.19 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.34 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.61 MB
+[KeyValueRadixTree] Per Key (Actual): 100.76 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.40 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 30.19 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 28.18 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.66 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 2.81 MB
+[KeyValueRadixTree] Per Key (Actual): 29.45 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 15.89 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 39.21 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 32.14 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.72 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 3.99 MB
+[KeyValueRadixTree] Per Key (Actual): 41.85 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 17.99 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 41.40 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 32.83 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.74 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.78 MB
+[KeyValueRadixTree] Per Key (Actual): 50.09 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 17.71 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 44.56 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.37 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.75 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.35 MB
+[KeyValueRadixTree] Per Key (Actual): 66.53 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 17.49 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 51.78 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 35.54 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.90 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.49 MB
+[KeyValueRadixTree] Per Key (Actual): 99.47 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.07 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 29.33 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 28.99 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.92 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 2.75 MB
+[KeyValueRadixTree] Per Key (Actual): 28.82 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 16.12 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 39.75 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 32.78 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.29 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 3.93 MB
+[KeyValueRadixTree] Per Key (Actual): 41.20 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 16.49 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 41.67 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.14 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.41 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.71 MB
+[KeyValueRadixTree] Per Key (Actual): 49.43 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 17.03 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 44.56 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 35.75 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.03 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.28 MB
+[KeyValueRadixTree] Per Key (Actual): 65.90 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 16.92 ns/key (1000 keys)
+
+--- Benchmark: 1D Key-Value Radix Tree (8 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 50.69 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.54 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.48 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.43 MB
+[KeyValueRadixTree] Per Key (Actual): 98.83 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.92 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 86.01 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 83.05 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 70.93 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.67 MB
+[KeyValueRadixTree] Per Key (Actual): 69.99 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 118.10 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 118.48 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 65.01 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.30 MB
+[KeyValueRadixTree] Per Key (Actual): 87.05 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 98.26 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 108.09 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 50.95 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.54 MB
+[KeyValueRadixTree] Per Key (Actual): 68.61 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 92.63 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 110.95 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 67.56 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.60 MB
+[KeyValueRadixTree] Per Key (Actual): 79.73 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 101.64 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 142.29 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 53.88 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.41 MB
+[KeyValueRadixTree] Per Key (Actual): 109.14 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 94.45 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 108.37 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 68.29 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 20.14 MB
+[KeyValueRadixTree] Per Key (Actual): 211.17 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 93.91 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 118.68 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 54.18 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 14.05 MB
+[KeyValueRadixTree] Per Key (Actual): 147.36 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 63.94 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 85.07 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.48 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.46 MB
+[KeyValueRadixTree] Per Key (Actual): 67.72 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 60.54 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 80.83 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.07 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.17 MB
+[KeyValueRadixTree] Per Key (Actual): 64.66 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 64.04 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 86.33 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.74 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.86 MB
+[KeyValueRadixTree] Per Key (Actual): 82.42 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 77.64 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 93.18 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 56.51 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 13.96 MB
+[KeyValueRadixTree] Per Key (Actual): 146.34 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 87.70 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 108.78 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 51.55 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.44 MB
+[KeyValueRadixTree] Per Key (Actual): 119.98 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 60.65 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 80.22 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.21 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.13 MB
+[KeyValueRadixTree] Per Key (Actual): 64.29 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 57.91 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 80.53 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.12 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.08 MB
+[KeyValueRadixTree] Per Key (Actual): 63.78 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 62.86 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 85.59 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.83 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.75 MB
+[KeyValueRadixTree] Per Key (Actual): 81.29 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 72.56 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 95.69 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 57.23 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 12.48 MB
+[KeyValueRadixTree] Per Key (Actual): 130.83 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 89.93 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 130.27 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 49.95 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.02 MB
+[KeyValueRadixTree] Per Key (Actual): 115.58 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 67.27 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 93.04 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.40 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.10 MB
+[KeyValueRadixTree] Per Key (Actual): 63.93 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 61.81 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 83.00 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.92 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.03 MB
+[KeyValueRadixTree] Per Key (Actual): 63.21 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 63.67 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 93.90 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.40 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.70 MB
+[KeyValueRadixTree] Per Key (Actual): 80.76 bytes/key
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 61.23 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.52 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.74 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.35 MB
+[KeyValueRadixTree] Per Key (Actual): 45.57 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 18.48 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 69.99 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 47.35 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.16 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.28 MB
+[KeyValueRadixTree] Per Key (Actual): 65.82 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 20.99 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 75.25 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 49.26 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.30 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.57 MB
+[KeyValueRadixTree] Per Key (Actual): 79.36 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 18.99 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 87.37 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 50.69 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.93 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.15 MB
+[KeyValueRadixTree] Per Key (Actual): 106.39 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 23.98 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 62.74 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 92.96 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.47 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.54 MB
+[KeyValueRadixTree] Per Key (Actual): 47.64 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 12.19 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 35.53 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 29.72 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.21 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.46 MB
+[KeyValueRadixTree] Per Key (Actual): 46.76 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.00 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 43.60 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.86 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.03 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 5.66 MB
+[KeyValueRadixTree] Per Key (Actual): 59.35 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 20.05 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 46.98 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.86 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.31 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.46 MB
+[KeyValueRadixTree] Per Key (Actual): 67.70 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.43 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 49.79 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.44 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.88 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.05 MB
+[KeyValueRadixTree] Per Key (Actual): 84.41 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.72 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 66.03 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.59 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.84 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.24 MB
+[KeyValueRadixTree] Per Key (Actual): 117.84 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.48 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 34.29 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 28.40 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.85 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.34 MB
+[KeyValueRadixTree] Per Key (Actual): 45.49 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 17.91 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 48.86 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.75 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.69 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 5.54 MB
+[KeyValueRadixTree] Per Key (Actual): 58.05 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.24 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 45.70 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.97 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.56 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.33 MB
+[KeyValueRadixTree] Per Key (Actual): 66.41 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 53.11 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 48.52 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.54 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.35 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.93 MB
+[KeyValueRadixTree] Per Key (Actual): 83.12 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 18.91 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 54.06 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.86 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.92 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.11 MB
+[KeyValueRadixTree] Per Key (Actual): 116.55 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.35 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 32.97 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 29.73 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.28 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 4.28 MB
+[KeyValueRadixTree] Per Key (Actual): 44.83 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 16.15 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 42.25 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.58 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.98 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 5.48 MB
+[KeyValueRadixTree] Per Key (Actual): 57.42 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 17.33 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 45.20 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.51 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.02 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 6.27 MB
+[KeyValueRadixTree] Per Key (Actual): 65.77 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 18.23 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 48.54 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.44 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.85 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 7.87 MB
+[KeyValueRadixTree] Per Key (Actual): 82.49 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 18.84 ns/key (1000 keys)
+
+--- Benchmark: 3D Key-Value Radix Tree (24 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 54.46 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.87 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.15 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.06 MB
+[KeyValueRadixTree] Per Key (Actual): 115.94 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 22.88 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 83.12 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 88.22 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 78.21 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.48 MB
+[KeyValueRadixTree] Per Key (Actual): 109.93 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 110.77 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 151.46 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 74.81 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 14.07 MB
+[KeyValueRadixTree] Per Key (Actual): 147.56 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 92.96 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 132.66 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 55.30 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.45 MB
+[KeyValueRadixTree] Per Key (Actual): 120.05 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 98.75 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 139.20 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 54.10 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 12.94 MB
+[KeyValueRadixTree] Per Key (Actual): 135.66 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 116.37 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 146.13 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 55.65 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 16.99 MB
+[KeyValueRadixTree] Per Key (Actual): 178.14 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 106.04 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 120.09 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 72.17 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 23.99 MB
+[KeyValueRadixTree] Per Key (Actual): 251.53 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 107.55 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 131.44 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 56.29 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 19.29 MB
+[KeyValueRadixTree] Per Key (Actual): 202.29 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 79.30 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 94.19 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 42.57 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.58 MB
+[KeyValueRadixTree] Per Key (Actual): 110.93 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 71.06 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 88.26 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.06 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.08 MB
+[KeyValueRadixTree] Per Key (Actual): 105.71 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 78.10 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 97.35 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 40.82 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.89 MB
+[KeyValueRadixTree] Per Key (Actual): 124.65 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 92.81 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 124.45 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 68.23 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 17.79 MB
+[KeyValueRadixTree] Per Key (Actual): 186.57 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 106.78 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 135.47 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 57.65 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 16.69 MB
+[KeyValueRadixTree] Per Key (Actual): 174.96 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 73.64 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 86.08 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.94 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.26 MB
+[KeyValueRadixTree] Per Key (Actual): 107.60 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 66.13 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 85.80 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.83 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.96 MB
+[KeyValueRadixTree] Per Key (Actual): 104.43 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 72.87 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 91.05 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.27 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.75 MB
+[KeyValueRadixTree] Per Key (Actual): 123.20 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 90.60 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 111.10 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 60.73 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 16.31 MB
+[KeyValueRadixTree] Per Key (Actual): 171.04 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 104.67 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 134.41 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 53.89 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 16.28 MB
+[KeyValueRadixTree] Per Key (Actual): 170.75 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 76.96 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 93.29 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.18 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.23 MB
+[KeyValueRadixTree] Per Key (Actual): 107.31 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 72.33 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 92.73 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 35.25 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.94 MB
+[KeyValueRadixTree] Per Key (Actual): 104.24 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Random distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 73.17 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 99.71 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.57 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.76 MB
+[KeyValueRadixTree] Per Key (Actual): 123.32 bytes/key
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 68.96 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 45.18 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.14 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.16 MB
+[KeyValueRadixTree] Per Key (Actual): 85.61 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 20.13 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 79.56 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 55.17 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.51 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.81 MB
+[KeyValueRadixTree] Per Key (Actual): 113.34 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 24.52 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 84.44 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 61.85 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.28 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 12.58 MB
+[KeyValueRadixTree] Per Key (Actual): 131.89 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 22.71 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 99.51 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 61.15 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 10.57 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 16.11 MB
+[KeyValueRadixTree] Per Key (Actual): 168.96 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 27.55 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=16, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 67.80 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 78.59 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.38 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.62 MB
+[KeyValueRadixTree] Per Key (Actual): 90.34 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 12.97 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 45.51 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 33.16 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.60 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.28 MB
+[KeyValueRadixTree] Per Key (Actual): 86.80 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.23 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 50.53 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.26 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 7.96 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.53 MB
+[KeyValueRadixTree] Per Key (Actual): 99.90 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 65.38 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 53.74 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.77 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.28 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.35 MB
+[KeyValueRadixTree] Per Key (Actual): 108.56 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.41 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 56.11 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.80 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.84 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 12.01 MB
+[KeyValueRadixTree] Per Key (Actual): 125.89 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.36 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=4, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 62.95 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.89 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.74 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 15.31 MB
+[KeyValueRadixTree] Per Key (Actual): 160.54 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 22.95 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 42.84 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 31.26 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.46 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.16 MB
+[KeyValueRadixTree] Per Key (Actual): 85.53 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.01 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 49.30 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.70 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.77 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.40 MB
+[KeyValueRadixTree] Per Key (Actual): 98.60 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.51 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 52.34 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 35.33 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.57 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.23 MB
+[KeyValueRadixTree] Per Key (Actual): 107.27 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.01 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 58.04 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 36.93 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.77 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.88 MB
+[KeyValueRadixTree] Per Key (Actual): 124.59 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.42 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=8, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 65.20 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.77 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.87 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 15.19 MB
+[KeyValueRadixTree] Per Key (Actual): 159.25 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 22.43 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=1 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 39.78 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.02 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.13 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 8.09 MB
+[KeyValueRadixTree] Per Key (Actual): 84.87 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 18.38 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=2 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 48.35 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 34.57 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.64 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 9.34 MB
+[KeyValueRadixTree] Per Key (Actual): 97.97 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.18 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=4 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 70.29 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 37.02 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 9.65 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 10.17 MB
+[KeyValueRadixTree] Per Key (Actual): 106.63 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 20.90 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=8 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 75.35 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.17 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.91 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 11.82 MB
+[KeyValueRadixTree] Per Key (Actual): 123.96 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 19.70 ns/key (1000 keys)
+
+--- Benchmark: 8D Key-Value Radix Tree (64 bytes), FANOUT=256, SLOTS_PER_PAGE=16, BUCKET_SIZE=16 ---
+--- Configuration: 100000 keys, Sequential distribution ---
+
+--- INSERTION ---
+[KeyValueRadixTree] Avg Latency: 83.03 ns/insert
+
+--- HIT LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 38.60 ns/get
+
+--- MISS LATENCY (LOOKUP) ---
+[KeyValueRadixTree] Avg Latency: 8.76 ns/get
+
+--- MEMORY USAGE ---
+[KeyValueRadixTree] Total (Actual): 15.13 MB
+[KeyValueRadixTree] Per Key (Actual): 158.61 bytes/key
+
+--- RANGE SCAN ---
+[KeyValueRadixTree] Avg Latency: 21.75 ns/key (1000 keys)

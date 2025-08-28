@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <string>
 #include <unordered_map>
+#include <cstring>
 
 // --- Constants for the data structure ---
 const uint64_t POINTER_TAG = 1ULL << 63;
@@ -24,14 +25,15 @@ const unsigned int MAX_DEPTH = (63 + BITS_PER_LEVEL - 1) / BITS_PER_LEVEL;
 // A simple memory manager using a single mmap-ed region.
 class MemoryManager {
 public:
-    explicit MemoryManager(size_t size) : allocation_size(size) {
-        base_ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    explicit MemoryManager(size_t initial_size = 4096)
+        : base_ptr(mmap(nullptr, initial_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)),
+          current_ptr(static_cast<uint8_t*>(base_ptr)),
+          end_ptr(static_cast<uint8_t*>(base_ptr) + initial_size),
+          allocation_size(initial_size),
+          allocated_bytes(0) {
         if (base_ptr == MAP_FAILED) {
             throw std::runtime_error("Failed to mmap memory");
         }
-        current_ptr = static_cast<uint8_t*>(base_ptr);
-        end_ptr = current_ptr + size;
-        allocated_bytes = 0;
     }
 
     ~MemoryManager() {
@@ -45,9 +47,28 @@ public:
 
     void* alloc(size_t size) {
         size_t aligned_size = (size + 7) & ~7;
+
         if (current_ptr + aligned_size > end_ptr) {
-            throw std::bad_alloc();
+            size_t required_bytes = allocated_bytes + aligned_size;
+            size_t new_size = allocation_size;
+            while (new_size < required_bytes) {
+                new_size *= 2;
+            }
+
+            void* new_base_ptr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (new_base_ptr == MAP_FAILED) {
+                throw std::bad_alloc();
+            }
+
+            memcpy(new_base_ptr, base_ptr, allocated_bytes);
+            munmap(base_ptr, allocation_size);
+
+            base_ptr = new_base_ptr;
+            current_ptr = static_cast<uint8_t*>(base_ptr) + allocated_bytes;
+            end_ptr = static_cast<uint8_t*>(base_ptr) + new_size;
+            allocation_size = new_size;
         }
+
         void* mem = current_ptr;
         current_ptr += aligned_size;
         allocated_bytes += aligned_size;
@@ -85,7 +106,7 @@ struct Node {
 // The main data structure class.
 class LayeredSlotMap {
 public:
-    explicit LayeredSlotMap(size_t size) : mem(size) {
+    explicit LayeredSlotMap() : mem() {
         void* root_node_ptr = mem.alloc(sizeof(Node));
         root_node_offset = mem.get_offset(root_node_ptr);
     }
@@ -112,10 +133,17 @@ public:
             uint64_t existing_key = slot;
             if (existing_key == key) return;
 
+            // Allocate a new node to resolve the collision.
             void* new_node_ptr = mem.alloc(sizeof(Node));
             uint64_t new_node_offset = mem.get_offset(new_node_ptr);
-            slot = new_node_offset | POINTER_TAG;
-            current_node = static_cast<Node*>(new_node_ptr);
+
+            // BUG FIX: Re-fetch the parent node pointer as mem.alloc might have moved memory.
+            // Then update its slot to point to the new node.
+            static_cast<Node*>(mem.get_ptr(current_node_offset))->slots[index] = new_node_offset | POINTER_TAG;
+
+            // 'child_node' is the newly created node where we'll place the colliding keys.
+            Node* child_node = static_cast<Node*>(new_node_ptr);
+            uint64_t child_node_offset = new_node_offset;
             unsigned int next_depth = depth + 1;
 
             while (next_depth < MAX_DEPTH) {
@@ -124,14 +152,22 @@ public:
                 uint64_t index_new = (key >> next_shift) & LEVEL_INDEX_MASK;
 
                 if (index_existing != index_new) {
-                    current_node->slots[index_existing] = existing_key;
-                    current_node->slots[index_new] = key;
+                    // The keys diverge at this level, so they can be placed in different slots of the current child_node.
+                    child_node->slots[index_existing] = existing_key;
+                    child_node->slots[index_new] = key;
                     return;
                 }
+
+                // Keys still collide. Need to create another intermediate node.
                 void* intermediate_node_ptr = mem.alloc(sizeof(Node));
                 uint64_t intermediate_node_offset = mem.get_offset(intermediate_node_ptr);
-                current_node->slots[index_existing] = intermediate_node_offset | POINTER_TAG;
-                current_node = static_cast<Node*>(intermediate_node_ptr);
+
+                // BUG FIX: Re-fetch the child_node pointer before modifying it.
+                static_cast<Node*>(mem.get_ptr(child_node_offset))->slots[index_existing] = intermediate_node_offset | POINTER_TAG;
+
+                // The new intermediate node becomes the child for the next iteration.
+                child_node = static_cast<Node*>(intermediate_node_ptr);
+                child_node_offset = intermediate_node_offset;
                 next_depth++;
             }
         }
@@ -203,8 +239,6 @@ private:
 };
 
 void run_benchmark(size_t num_keys, const std::string& key_type) {
-    const size_t SHT_MEM_SIZE = num_keys * 40;
-
     std::cout << "\n\n--- Benchmark Run ---" << std::endl;
     std::cout << "--- Configuration: " << num_keys << " keys, " << key_type << " distribution ---" << std::endl;
 
@@ -220,7 +254,7 @@ void run_benchmark(size_t num_keys, const std::string& key_type) {
     // --- Insert Benchmark ---
     std::cout << "\n--- INSERTION ---" << std::endl;
     // LayeredSlotMap
-    LayeredSlotMap sht(SHT_MEM_SIZE);
+    LayeredSlotMap sht;
     auto start_time = std::chrono::high_resolution_clock::now();
     for (uint64_t key : keys) {
         sht.insert(key);
@@ -315,18 +349,15 @@ void run_benchmark(size_t num_keys, const std::string& key_type) {
 
 int main() {
     try {
-        const size_t ONE_MILLION = 1000000;
-        const size_t TEN_MILLION = 10000000;
-        const size_t TWENTY_MILLION = 20000000;
+        run_benchmark(1, "Sequential");
+        run_benchmark(100, "Sequential");
+        run_benchmark(1000, "Sequential");
+        run_benchmark(1000000, "Sequential");
 
-        run_benchmark(ONE_MILLION, "Random");
-        run_benchmark(ONE_MILLION, "Sequential");
-
-        run_benchmark(TEN_MILLION, "Random");
-        run_benchmark(TEN_MILLION, "Sequential");
-
-        run_benchmark(TWENTY_MILLION, "Random");
-        run_benchmark(TWENTY_MILLION, "Sequential");
+        run_benchmark(1, "Random");
+        run_benchmark(100, "Random");
+        run_benchmark(1000, "Random");
+        run_benchmark(1000000, "Random");
 
     } catch (const std::exception& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;

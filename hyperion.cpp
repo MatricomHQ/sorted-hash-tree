@@ -144,9 +144,11 @@ class ART {
     std::atomic<u32> root_ptr_{0};
     const u32 dim_;
 
-    static inline uint8_t get_key_fragment(const u64* key, int depth) {
-        if((size_t)depth >= sizeof(u64) * key[0]) return 0;
-        return ((uint8_t*)key)[depth];
+    static inline uint8_t get_key_fragment(const u64* key, int depth, u32 dim) {
+        if ((size_t)depth >= dim * sizeof(u64)) return 0;
+        const u32 u64_idx = depth / sizeof(u64);
+        const u32 byte_shift = (depth % sizeof(u64)) * 8;
+        return (key[u64_idx] >> byte_shift) & 0xFF;
     }
 
     void insert_recursive(const u64* key, u64 value, std::atomic<u32>* parent_slot, int depth) {
@@ -167,7 +169,15 @@ class ART {
             if (TaggedIndex::is_leaf(current_tagged_ptr)) {
                 u32 existing_rec_idx = TaggedIndex::get_index(current_tagged_ptr);
                 Record* existing_rec = rm_.get_record(existing_rec_idx);
-                if (memcmp(key, existing_rec->coords, dim_ * sizeof(u64)) == 0) return;
+
+                bool are_equal = true;
+                for(u32 i = 0; i < dim_; ++i) {
+                    if (key[i] != existing_rec->coords[i]) {
+                        are_equal = false;
+                        break;
+                    }
+                }
+                if (are_equal) return;
 
                 if (leaf_ptr == 0) {
                     u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
@@ -177,8 +187,8 @@ class ART {
                 u32 node16_idx = nm16_->allocate_node();
                 Node16Type* node = nm16_->get_node(node16_idx);
 
-                int existing_frag = get_key_fragment(existing_rec->coords, depth);
-                int new_frag = get_key_fragment(key, depth);
+                int existing_frag = get_key_fragment(existing_rec->coords, depth, dim_);
+                int new_frag = get_key_fragment(key, depth, dim_);
 
                 if (existing_frag != new_frag) {
                     node->keys[0] = std::min(existing_frag, new_frag);
@@ -201,15 +211,47 @@ class ART {
 
             if (TaggedIndex::is_node16(current_tagged_ptr)) {
                 Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
-                uint8_t frag = get_key_fragment(key, depth);
-
+                uint8_t frag = get_key_fragment(key, depth, dim_);
+                int index = -1;
                 uint8_t count = node->count.load(std::memory_order_relaxed);
+
+                #if defined(__x86_64__) || defined(_M_X64)
+                if constexpr (NODE16_SIZE >= 16) {
+                    __m128i keys_vec = _mm_loadu_si128((const __m128i*)node->keys);
+                    __m128i frag_vec = _mm_set1_epi8(frag);
+                    __m128i cmp_mask_vec = _mm_cmpeq_epi8(keys_vec, frag_vec);
+                    int mask = _mm_movemask_epi8(cmp_mask_vec);
+                    mask &= (1 << count) - 1;
+                    if (mask > 0) {
+                        #if defined(__GNUC__) || defined(__clang__)
+                        index = __builtin_ctz(mask);
+                        #else
+                        unsigned long bsf_index;
+                        _BitScanForward(&bsf_index, mask);
+                        index = bsf_index;
+                        #endif
+                    }
+                } else {
+                    for(uint8_t i=0; i<count; ++i) {
+                        if(node->keys[i] == frag) {
+                            index = i;
+                            break;
+                        }
+                    }
+                }
+                #else
                 for(uint8_t i=0; i<count; ++i) {
                     if(node->keys[i] == frag) {
-                        parent_slot = &node->children[i];
-                        depth++;
-                        goto next_level;
+                        index = i;
+                        break;
                     }
+                }
+                #endif
+
+                if (index != -1) {
+                    parent_slot = &node->children[index];
+                    depth++;
+                    goto next_level;
                 }
 
                 if (!node->is_full()) {
@@ -239,7 +281,7 @@ class ART {
 
             if (TaggedIndex::is_node256(current_tagged_ptr)) {
                 Node256* node = nm256_.get_node(TaggedIndex::get_index(current_tagged_ptr));
-                parent_slot = &node->children[get_key_fragment(key, depth)];
+                parent_slot = &node->children[get_key_fragment(key, depth, dim_)];
                 depth++;
                 continue;
             }
@@ -268,7 +310,14 @@ public:
 
             if(TaggedIndex::is_leaf(current_tagged_ptr)) {
                 Record* rec = rm_.get_record(TaggedIndex::get_index(current_tagged_ptr));
-                if(memcmp(key, rec->coords, dim_ * sizeof(u64)) == 0) {
+                bool are_equal = true;
+                for(u32 i = 0; i < dim_; ++i) {
+                    if (key[i] != rec->coords[i]) {
+                        are_equal = false;
+                        break;
+                    }
+                }
+                if (are_equal) {
                     ValueType val;
                     memcpy(&val, &rec->value, sizeof(ValueType));
                     return val;
@@ -276,9 +325,31 @@ public:
                 return std::nullopt;
             }
 
-            uint8_t frag = get_key_fragment(key, depth);
+            uint8_t frag = get_key_fragment(key, depth, dim_);
             if(TaggedIndex::is_node16(current_tagged_ptr)) {
                 Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
+                #if defined(__x86_64__) || defined(_M_X64)
+                if constexpr (NODE16_SIZE >= 16) {
+                    __m128i keys_vec = _mm_loadu_si128((const __m128i*)node->keys);
+                    __m128i frag_vec = _mm_set1_epi8(frag);
+                    __m128i cmp_mask_vec = _mm_cmpeq_epi8(keys_vec, frag_vec);
+                    int mask = _mm_movemask_epi8(cmp_mask_vec);
+                    uint8_t count = node->count.load(std::memory_order_relaxed);
+                    mask &= (1 << count) - 1;
+                    if (mask > 0) {
+                        #if defined(__GNUC__) || defined(__clang__)
+                        int index = __builtin_ctz(mask);
+                        #else
+                        unsigned long index;
+                        _BitScanForward(&index, mask);
+                        #endif
+                        current_tagged_ptr = node->children[index].load(std::memory_order_acquire);
+                        depth++;
+                        goto next_level;
+                    }
+                    return std::nullopt;
+                }
+                #endif
                 uint8_t count = node->count.load(std::memory_order_relaxed);
                 for(uint8_t i=0; i<count; ++i) {
                     if(node->keys[i] == frag) {

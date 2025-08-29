@@ -35,85 +35,64 @@ using u16 = uint16_t;
 // --- Foundational Data Structures ---
 
 struct Record {
-    u32 value_len;
-    u32 dim;
-    u64 value_or_offset;
+    u64 value;
     u64 coords[];
-
-    static constexpr u32 INLINE_FLAG = 1U << 31;
-    bool is_value_inlined() const { return (dim & INLINE_FLAG) != 0; }
-    void set_inlined(bool is_inlined) { dim = (dim & ~INLINE_FLAG) | (is_inlined ? INLINE_FLAG : 0); }
     static size_t get_size(u32 d) { return sizeof(Record) + sizeof(u64) * d; }
 };
 
 namespace TaggedIndex {
-    static constexpr u32 NODE_TAG = 0b00;
-    static constexpr u32 LEAF_TAG = 0b10;
-    static constexpr u32 TAG_MASK = 0b11 << 30; // Reduced mask
-    static constexpr u32 INDEX_MASK = ~TAG_MASK;
-    inline u32 get_tag(u32 idx) { return (idx >> 30); }
-    inline u32 get_index(u32 idx) { return idx & INDEX_MASK; }
-    inline bool is_leaf(u32 idx) { return get_tag(idx) == LEAF_TAG; }
-    inline bool is_node(u32 idx) { return get_tag(idx) == NODE_TAG && idx != 0; }
+    static constexpr u32 NODE256_TAG = 0b00;
+    static constexpr u32 NODE16_TAG  = 0b01;
+    static constexpr u32 LEAF_TAG    = 0b10;
+
+    static constexpr u32 TAG_MASK    = 0b11 << 30;
+    static constexpr u32 INDEX_MASK  = ~TAG_MASK;
+
+    inline u32 get_tag(u32 ptr) { return (ptr >> 30); }
+    inline u32 get_index(u32 ptr) { return ptr & INDEX_MASK; }
+
+    inline bool is_leaf(u32 ptr) { return get_tag(ptr) == LEAF_TAG; }
+    inline bool is_node16(u32 ptr) { return get_tag(ptr) == NODE16_TAG; }
+    inline bool is_node256(u32 ptr) { return get_tag(ptr) == NODE256_TAG && ptr != 0; }
+
     inline u32 make_leaf_idx(u32 rec_idx) { return (rec_idx & INDEX_MASK) | (LEAF_TAG << 30); }
-    inline u32 make_node_idx(u32 node_idx) { return (node_idx & INDEX_MASK); }
+    inline u32 make_node16_idx(u32 node_idx) { return (node_idx & INDEX_MASK) | (NODE16_TAG << 30); }
+    inline u32 make_node256_idx(u32 node_idx) { return (node_idx & INDEX_MASK) | (NODE256_TAG << 30); }
 };
 
-template<size_t SLOTS> struct NodePage { std::atomic<u32> children[SLOTS]; NodePage() { for (size_t i = 0; i < SLOTS; ++i) children[i].store(0, std::memory_order_relaxed); } };
+template<size_t SIZE> struct Node16 {
+    std::atomic<uint8_t> count{0};
+    uint8_t keys[SIZE];
+    std::atomic<u32> children[SIZE];
+    Node16() { for(size_t i=0; i<SIZE; ++i) { keys[i] = 0; children[i].store(0, std::memory_order_relaxed); }}
+    bool is_full() const { return count.load(std::memory_order_relaxed) >= SIZE; }
+};
 
-template<size_t FANOUT, size_t SLOTS_PER_PAGE = 16, size_t PAGED_THRESHOLD = 16>
-struct RadixNode {
-    u32 test_nibble_idx = 0;
-    u32 representative_record_idx = 0;
-    static constexpr bool IS_PAGED = FANOUT >= PAGED_THRESHOLD;
-    using PageType = NodePage<SLOTS_PER_PAGE>;
-    static constexpr size_t PAGES_PER_NODE = IS_PAGED ? (FANOUT + SLOTS_PER_PAGE - 1) / SLOTS_PER_PAGE : 0;
-    std::conditional_t<IS_PAGED, std::atomic<PageType*>[PAGES_PER_NODE], std::atomic<u32>[FANOUT]> children_or_pages;
-    RadixNode() {
-        if constexpr (IS_PAGED) for (size_t i = 0; i < PAGES_PER_NODE; ++i) children_or_pages[i].store(nullptr, std::memory_order_relaxed);
-        else for (size_t i = 0; i < FANOUT; ++i) children_or_pages[i].store(0, std::memory_order_relaxed);
-    }
+struct Node256 {
+    std::atomic<u32> children[256];
+    Node256() { for (size_t i = 0; i < 256; ++i) children[i].store(0, std::memory_order_relaxed); }
 };
 
 // --- Memory Management ---
-class NodeManager {
-    std::atomic<u32> next_node_idx_{1};
-    uint8_t* node_pool_;
-    const size_t node_size_;
-    static constexpr u32 MAX_NODES = 8 * 1024 * 1024;
+template<typename T>
+class Manager {
+    std::atomic<u32> next_idx_{1};
+    uint8_t* pool_;
+    const size_t max_nodes_;
 public:
-    NodeManager(size_t node_size) : node_size_(node_size) {
-        node_pool_ = (uint8_t*)mmap(nullptr, (size_t)MAX_NODES * node_size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (node_pool_ == MAP_FAILED) throw std::runtime_error("mmap failed for node pool");
+    Manager(size_t max_nodes) : max_nodes_(max_nodes) {
+        size_t pool_size = max_nodes_ * sizeof(T);
+        pool_ = (uint8_t*)mmap(nullptr, pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (pool_ == MAP_FAILED) throw std::runtime_error("mmap failed");
     }
-    ~NodeManager() { munmap(node_pool_, (size_t)MAX_NODES * node_size_); }
-    template<typename TNode> TNode* get_node(u32 idx) { return reinterpret_cast<TNode*>(node_pool_ + (size_t)idx * node_size_); }
-    template<typename TNode> u32 allocate_node() {
-        u32 idx = next_node_idx_.fetch_add(1, std::memory_order_relaxed);
-        if (idx >= MAX_NODES) throw std::runtime_error("Node pool exhausted");
-        new (get_node<TNode>(idx)) TNode(); return idx;
+    ~Manager() { munmap(pool_, max_nodes_ * sizeof(T)); }
+    T* get_node(u32 idx) { return reinterpret_cast<T*>(pool_ + (size_t)idx * sizeof(T)); }
+    u32 allocate_node() {
+        u32 idx = next_idx_.fetch_add(1, std::memory_order_relaxed);
+        if (idx >= max_nodes_) throw std::runtime_error("Pool exhausted");
+        new (get_node(idx)) T(); return idx;
     }
-    size_t get_mem_usage() const { return (size_t)next_node_idx_.load() * node_size_; }
-};
-
-class PageManager {
-    std::atomic<u32> next_page_idx_{1};
-    uint8_t* page_pool_;
-    const size_t page_size_;
-    static constexpr u32 MAX_PAGES = 32 * 1024 * 1024;
-public:
-    PageManager(size_t page_size) : page_size_(page_size) {
-        page_pool_ = (uint8_t*)mmap(nullptr, (size_t)MAX_PAGES * page_size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (page_pool_ == MAP_FAILED) throw std::runtime_error("mmap failed for page pool");
-    }
-    ~PageManager() { munmap(page_pool_, (size_t)MAX_PAGES * page_size_); }
-    template<typename TPage> TPage* get_page(u32 idx) { return reinterpret_cast<TPage*>(page_pool_ + (size_t)idx * page_size_); }
-    template<typename TPage> TPage* allocate_page_and_get_ptr() {
-        u32 idx = next_page_idx_.fetch_add(1, std::memory_order_relaxed);
-        if (idx >= MAX_PAGES) throw std::runtime_error("Page pool exhausted");
-        TPage* page = get_page<TPage>(idx); new (page) TPage(); return page;
-    }
-    size_t get_mem_usage() const { return (size_t)next_page_idx_.load() * page_size_; }
+    size_t get_mem_usage() const { return (size_t)next_idx_.load() * sizeof(T); }
 };
 
 class RecordManager {
@@ -128,184 +107,236 @@ public:
     }
     ~RecordManager() { munmap(record_pool_, (size_t)MAX_RECORDS * record_size_with_coords_); }
     Record* get_record(u32 idx) { return reinterpret_cast<Record*>(record_pool_ + (size_t)idx * record_size_with_coords_); }
-    u32 allocate_record(const u64* coords, u32 dim, u64 value, u32 value_len) {
+    u32 allocate_record(const u64* coords, u32 dim, u64 value) {
         u32 idx = next_record_idx_.fetch_add(1, std::memory_order_relaxed);
         if (idx >= MAX_RECORDS) throw std::runtime_error("Record pool exhausted");
         Record* rec = get_record(idx);
-        rec->dim = dim; rec->value_len = value_len;
-        rec->value_or_offset = value;
-        rec->set_inlined(true);
+        rec->value = value;
         memcpy(rec->coords, coords, sizeof(u64) * dim);
         return idx;
     }
     size_t get_mem_usage() const { return (size_t)next_record_idx_.load() * record_size_with_coords_; }
 };
 
+
 struct MemoryContext {
-    std::unique_ptr<NodeManager> nm;
+    std::unique_ptr<Manager<Node16<4>>> nm16_4;
+    std::unique_ptr<Manager<Node16<16>>> nm16_16;
+    std::unique_ptr<Manager<Node256>> nm256;
     std::unique_ptr<RecordManager> rm;
-    std::unique_ptr<PageManager> pm;
-    MemoryContext(size_t node_size, size_t page_size, u32 dimensionality) {
-        nm = std::make_unique<NodeManager>(node_size);
+    MemoryContext(u32 dimensionality) {
+        nm16_4 = std::make_unique<Manager<Node16<4>>>(16 * 1024 * 1024);
+        nm16_16 = std::make_unique<Manager<Node16<16>>>(16 * 1024 * 1024);
+        nm256 = std::make_unique<Manager<Node256>>(2 * 1024 * 1024);
         rm = std::make_unique<RecordManager>(dimensionality);
-        pm = std::make_unique<PageManager>(page_size);
-    }
-    size_t get_mem_usage() const {
-        return nm->get_mem_usage() + rm->get_mem_usage() + pm->get_mem_usage();
     }
 };
 
-// --- Radix Tree Core ---
-template<size_t FANOUT, size_t SLOTS_PER_PAGE, typename ValueType>
-class KeyValueRadixTree {
-    using NodeType = RadixNode<FANOUT, SLOTS_PER_PAGE>;
-    NodeManager& node_manager_; RecordManager& record_manager_; PageManager& page_manager_;
+// --- Adaptive Radix Tree ---
+template<size_t NODE16_SIZE, typename ValueType>
+class ART {
+    using Node16Type = Node16<NODE16_SIZE>;
+
+    Manager<Node16<NODE16_SIZE>>* nm16_;
+    Manager<Node256>& nm256_;
+    RecordManager& rm_;
+
     std::atomic<u32> root_ptr_{0};
     const u32 dim_;
 
-    static inline int get_key_fragment(const u64* coords, int frag_idx, int d) {
-        if constexpr (FANOUT == 16) { int max_frags = d * 16; if (frag_idx < 0 || frag_idx >= max_frags) return 0; return (coords[frag_idx / 16] >> (60 - ((frag_idx % 16) * 4))) & 0x0F; }
-        else if constexpr (FANOUT == 256) { int max_frags = d * 8; if (frag_idx < 0 || frag_idx >= max_frags) return 0; return (coords[frag_idx / 8] >> (56 - ((frag_idx % 8) * 8))) & 0xFF; }
-        return 0;
+    static inline uint8_t get_key_fragment(const u64* key, int depth) {
+        if((size_t)depth >= sizeof(u64) * key[0]) return 0;
+        return ((uint8_t*)key)[depth];
     }
-    static int find_first_differing_fragment(const u64* k1, const u64* k2, int d, int start_frag = 0) {
-        int max_frags = d * (FANOUT == 16 ? 16 : 8);
-        for (int i = start_frag; i < max_frags; ++i) if (get_key_fragment(k1, i, d) != get_key_fragment(k2, i, d)) return i;
-        return -1;
-    }
-    void insert_into_new_node(NodeType* node, u32 record_idx, const u64* key, int diff_idx, u32 existing_tagged_idx) {
-        const u64* existing_coords = nullptr;
-        if (TaggedIndex::is_leaf(existing_tagged_idx)) existing_coords = record_manager_.get_record(TaggedIndex::get_index(existing_tagged_idx))->coords;
-        else if (TaggedIndex::is_node(existing_tagged_idx)) existing_coords = record_manager_.get_record(node_manager_.template get_node<NodeType>(TaggedIndex::get_index(existing_tagged_idx))->representative_record_idx)->coords;
-        else return;
-        get_child_slot<true>(node, get_key_fragment(key, diff_idx, dim_))->store(TaggedIndex::make_leaf_idx(record_idx), std::memory_order_relaxed);
-        get_child_slot<true>(node, get_key_fragment(existing_coords, diff_idx, dim_))->store(existing_tagged_idx, std::memory_order_relaxed);
-    }
-public:
-    KeyValueRadixTree(MemoryContext& ctx, u32 d) : node_manager_(*ctx.nm), record_manager_(*ctx.rm), page_manager_(*ctx.pm), dim_(d) {}
 
-    void insert(const u64* coords, ValueType value) {
-        static_assert(sizeof(ValueType) <= sizeof(u64)); u64 val_u64 = 0; memcpy(&val_u64, &value, sizeof(ValueType));
-        insert_recursive(coords, val_u64, &root_ptr_);
-    }
-    void insert_recursive(const u64* coords, u64 value, std::atomic<u32>* parent_slot) {
-    restart:
-        u32 current_idx = parent_slot->load(std::memory_order_acquire);
-        while(TaggedIndex::is_node(current_idx)) {
-            NodeType* node = node_manager_.template get_node<NodeType>(TaggedIndex::get_index(current_idx));
-            Record* rep_rec = record_manager_.get_record(node->representative_record_idx);
-            int diff_idx = find_first_differing_fragment(coords, rep_rec->coords, dim_);
-            if (diff_idx != -1 && (u32)diff_idx < node->test_nibble_idx) {
-                u32 new_rec_idx = record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType));
-                u32 new_node_idx = node_manager_.template allocate_node<NodeType>();
-                NodeType* new_node = node_manager_.template get_node<NodeType>(new_node_idx);
-                new_node->test_nibble_idx = diff_idx; new_node->representative_record_idx = new_rec_idx;
-                insert_into_new_node(new_node, new_rec_idx, coords, diff_idx, current_idx);
-                if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-                goto restart;
+    void insert_recursive(const u64* key, u64 value, std::atomic<u32>* parent_slot, int depth) {
+        u32 leaf_ptr = 0;
+
+        while(true) {
+            u32 current_tagged_ptr = parent_slot->load(std::memory_order_acquire);
+
+            if (current_tagged_ptr == 0) {
+                if (leaf_ptr == 0) {
+                    u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
+                    leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
+                }
+                if(parent_slot->compare_exchange_strong(current_tagged_ptr, leaf_ptr, std::memory_order_release, std::memory_order_relaxed)) return;
+                else continue;
             }
-            int frag = get_key_fragment(coords, node->test_nibble_idx, dim_);
-            parent_slot = get_child_slot<true>(node, frag); if (!parent_slot) goto restart;
-            current_idx = parent_slot->load(std::memory_order_acquire);
-        }
-        if (current_idx == 0) {
-            u32 new_rec_idx = record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType));
-            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_leaf_idx(new_rec_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-            goto restart;
-        }
-        if (TaggedIndex::is_leaf(current_idx)) {
-            Record* existing_rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
-            if (memcmp(coords, existing_rec->coords, dim_ * sizeof(u64)) == 0) return;
-            u32 new_rec_idx = record_manager_.allocate_record(coords, dim_, value, sizeof(ValueType));
-            int diff_idx = find_first_differing_fragment(coords, existing_rec->coords, dim_);
-            u32 new_node_idx = node_manager_.template allocate_node<NodeType>();
-            NodeType* new_node = node_manager_.template get_node<NodeType>(new_node_idx);
-            new_node->test_nibble_idx = diff_idx; new_node->representative_record_idx = new_rec_idx;
-            insert_into_new_node(new_node, new_rec_idx, coords, diff_idx, current_idx);
-            if (parent_slot->compare_exchange_strong(current_idx, TaggedIndex::make_node_idx(new_node_idx), std::memory_order_release, std::memory_order_relaxed)) return;
-            goto restart;
+
+            if (TaggedIndex::is_leaf(current_tagged_ptr)) {
+                u32 existing_rec_idx = TaggedIndex::get_index(current_tagged_ptr);
+                Record* existing_rec = rm_.get_record(existing_rec_idx);
+                if (memcmp(key, existing_rec->coords, dim_ * sizeof(u64)) == 0) return;
+
+                if (leaf_ptr == 0) {
+                    u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
+                    leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
+                }
+
+                u32 node16_idx = nm16_->allocate_node();
+                Node16Type* node = nm16_->get_node(node16_idx);
+
+                int existing_frag = get_key_fragment(existing_rec->coords, depth);
+                int new_frag = get_key_fragment(key, depth);
+
+                if (existing_frag != new_frag) {
+                    node->keys[0] = std::min(existing_frag, new_frag);
+                    node->keys[1] = std::max(existing_frag, new_frag);
+                    node->children[0].store(existing_frag < new_frag ? current_tagged_ptr : leaf_ptr, std::memory_order_relaxed);
+                    node->children[1].store(existing_frag < new_frag ? leaf_ptr : current_tagged_ptr, std::memory_order_relaxed);
+                    node->count.store(2, std::memory_order_relaxed);
+                    if(parent_slot->compare_exchange_strong(current_tagged_ptr, TaggedIndex::make_node16_idx(node16_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+                    else continue;
+                } else {
+                    node->keys[0] = new_frag;
+                    node->count.store(1, std::memory_order_relaxed);
+                    if(parent_slot->compare_exchange_strong(current_tagged_ptr, TaggedIndex::make_node16_idx(node16_idx), std::memory_order_release, std::memory_order_relaxed)) {
+                        insert_recursive(existing_rec->coords, existing_rec->value, &node->children[0], depth + 1);
+                        insert_recursive(key, value, &node->children[0], depth + 1);
+                        return;
+                    } else continue;
+                }
+            }
+
+            if (TaggedIndex::is_node16(current_tagged_ptr)) {
+                Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
+                uint8_t frag = get_key_fragment(key, depth);
+
+                uint8_t count = node->count.load(std::memory_order_relaxed);
+                for(uint8_t i=0; i<count; ++i) {
+                    if(node->keys[i] == frag) {
+                        parent_slot = &node->children[i];
+                        depth++;
+                        goto next_level;
+                    }
+                }
+
+                if (!node->is_full()) {
+                    if (leaf_ptr == 0) {
+                        u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
+                        leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
+                    }
+                    uint8_t c = node->count.fetch_add(1, std::memory_order_relaxed);
+                    node->keys[c] = frag;
+                    node->children[c].store(leaf_ptr, std::memory_order_release);
+                    return;
+                } else {
+                    u32 new_node256_idx = nm256_.allocate_node();
+                    Node256* new_node256 = nm256_.get_node(new_node256_idx);
+                    for(uint8_t i=0; i<count; ++i) {
+                        new_node256->children[node->keys[i]].store(node->children[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+                    }
+                    if (leaf_ptr == 0) {
+                        u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
+                        leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
+                    }
+                    new_node256->children[frag].store(leaf_ptr, std::memory_order_relaxed);
+                    if(parent_slot->compare_exchange_strong(current_tagged_ptr, TaggedIndex::make_node256_idx(new_node256_idx), std::memory_order_release, std::memory_order_relaxed)) return;
+                    else continue;
+                }
+            }
+
+            if (TaggedIndex::is_node256(current_tagged_ptr)) {
+                Node256* node = nm256_.get_node(TaggedIndex::get_index(current_tagged_ptr));
+                parent_slot = &node->children[get_key_fragment(key, depth)];
+                depth++;
+                continue;
+            }
+            next_level:;
         }
     }
-    std::optional<ValueType> get(const u64* coords) {
-        u32 current_idx = root_ptr_.load(std::memory_order_acquire);
-        while (TaggedIndex::is_node(current_idx)) {
-            NodeType* node = node_manager_.template get_node<NodeType>(TaggedIndex::get_index(current_idx));
-            std::atomic<u32>* child_slot = get_child_slot<false>(node, get_key_fragment(coords, node->test_nibble_idx, dim_));
-            if (!child_slot) return std::nullopt;
-            current_idx = child_slot->load(std::memory_order_acquire);
-        }
-        if (TaggedIndex::is_leaf(current_idx)) {
-            Record* rec = record_manager_.get_record(TaggedIndex::get_index(current_idx));
-            if (rec && memcmp(rec->coords, coords, dim_ * sizeof(u64)) == 0) { ValueType val; memcpy(&val, &rec->value_or_offset, sizeof(ValueType)); return val; }
+
+public:
+    ART(MemoryContext& ctx, u32 d) : nm256_(*ctx.nm256), rm_(*ctx.rm), dim_(d) {
+        if constexpr (NODE16_SIZE == 4) nm16_ = ctx.nm16_4.get();
+        else if constexpr (NODE16_SIZE == 16) nm16_ = ctx.nm16_16.get();
+    }
+
+    void insert(const u64* key, ValueType value) {
+        u64 val_u64 = 0;
+        memcpy(&val_u64, &value, sizeof(ValueType));
+        insert_recursive(key, val_u64, &root_ptr_, 0);
+    }
+
+    std::optional<ValueType> get(const u64* key) {
+        int depth = 0;
+        u32 current_tagged_ptr = root_ptr_.load(std::memory_order_acquire);
+
+        while(true) {
+            if(current_tagged_ptr == 0) return std::nullopt;
+
+            if(TaggedIndex::is_leaf(current_tagged_ptr)) {
+                Record* rec = rm_.get_record(TaggedIndex::get_index(current_tagged_ptr));
+                if(memcmp(key, rec->coords, dim_ * sizeof(u64)) == 0) {
+                    ValueType val;
+                    memcpy(&val, &rec->value, sizeof(ValueType));
+                    return val;
+                }
+                return std::nullopt;
+            }
+
+            uint8_t frag = get_key_fragment(key, depth);
+            if(TaggedIndex::is_node16(current_tagged_ptr)) {
+                Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
+                uint8_t count = node->count.load(std::memory_order_relaxed);
+                for(uint8_t i=0; i<count; ++i) {
+                    if(node->keys[i] == frag) {
+                        current_tagged_ptr = node->children[i].load(std::memory_order_acquire);
+                        depth++;
+                        goto next_level;
+                    }
+                }
+                return std::nullopt;
+            }
+
+            if(TaggedIndex::is_node256(current_tagged_ptr)) {
+                Node256* node = nm256_.get_node(TaggedIndex::get_index(current_tagged_ptr));
+                current_tagged_ptr = node->children[frag].load(std::memory_order_acquire);
+                depth++;
+                continue;
+            }
+            next_level:;
         }
         return std::nullopt;
     }
-private:
-    template<bool create_if_missing>
-    std::atomic<u32>* get_child_slot(NodeType* node, int frag) {
-        if constexpr (NodeType::IS_PAGED) {
-            size_t page_idx = frag / SLOTS_PER_PAGE;
-            typename NodeType::PageType* page = node->children_or_pages[page_idx].load(std::memory_order_acquire);
-            if (page == nullptr) {
-                if constexpr (!create_if_missing) return nullptr;
-                typename NodeType::PageType* new_page = page_manager_.template allocate_page_and_get_ptr<typename NodeType::PageType>();
-                if (!node->children_or_pages[page_idx].compare_exchange_strong(page, new_page, std::memory_order_release, std::memory_order_relaxed)) {}
-                page = node->children_or_pages[page_idx].load(std::memory_order_acquire);
-            }
-            return &page->children[frag % SLOTS_PER_PAGE];
-        } else return &node->children_or_pages[frag];
-    }
 };
 
+template<size_t NODE16_SIZE>
 void run_benchmark(int dimensionality, const std::string& key_type) {
     const size_t NUM_KEYS = 2000000;
-    std::cout << "\n--- Flat Radix Tree Benchmark (DIM=" << dimensionality << ", " << key_type << ") ---" << std::endl;
+    std::cout << "\n--- ART Benchmark (DIM=" << dimensionality << ", NODE16_SIZE=" << NODE16_SIZE << ", " << key_type << ") ---" << std::endl;
 
-    using TreeType = KeyValueRadixTree<256, 16, u64>;
-    using NodeType = RadixNode<256, 16>;
-    using PageType = NodePage<16>;
+    using TreeType = ART<NODE16_SIZE, u64>;
 
-    MemoryContext ctx(sizeof(NodeType), sizeof(PageType), dimensionality);
+    MemoryContext ctx(dimensionality);
     TreeType tree(ctx, dimensionality);
 
     std::vector<std::vector<u64>> keys(NUM_KEYS, std::vector<u64>(dimensionality));
     std::mt19937_64 rng(12345);
 
-    if (key_type == "Random") {
-        for (size_t i = 0; i < NUM_KEYS; ++i) {
-            for(int d = 0; d < dimensionality; ++d) keys[i][d] = rng();
-        }
-    } else if (key_type == "Sequential") {
-        for (size_t i = 0; i < NUM_KEYS; ++i) {
-            for(int d = 0; d < dimensionality; ++d) keys[i][d] = i;
-        }
-    } else if (key_type == "Clustered") {
+    if (key_type == "Random") for (auto& key : keys) for(int d=0; d<dimensionality; ++d) key[d] = rng();
+    else if (key_type == "Sequential") for (size_t i=0; i<NUM_KEYS; ++i) for(int d=0; d<dimensionality; ++d) keys[i][d] = i;
+    else if (key_type == "Clustered") {
         u64 prefix = rng();
-        for (size_t i = 0; i < NUM_KEYS; ++i) {
-            keys[i][0] = prefix;
-            for(int d = 1; d < dimensionality; ++d) keys[i][d] = rng();
-        }
+        for (auto& key : keys) { key[0] = prefix; for(int d=1; d<dimensionality; ++d) key[d] = rng(); }
     }
 
     auto start = std::chrono::high_resolution_clock::now();
-    for (const auto& key : keys) {
-        tree.insert(key.data(), (u64)key.data());
-    }
+    for (const auto& key : keys) tree.insert(key.data(), (u64)key.data());
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-    std::cout << "[RadixTree] Insertion: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
+    std::cout << "[ART] Insertion: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
 
     size_t found_count = 0;
     start = std::chrono::high_resolution_clock::now();
-    for (const auto& key : keys) {
-        if (tree.get(key.data())) found_count++;
-    }
+    for (const auto& key : keys) if(tree.get(key.data())) found_count++;
     end = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-    std::cout << "[RadixTree] Lookup: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << " (Found " << found_count << "/" << NUM_KEYS << ")" << std::endl;
+    std::cout << "[ART] Lookup: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << " (Found " << found_count << "/" << NUM_KEYS << ")" << std::endl;
 
-    size_t total_mem = ctx.get_mem_usage();
-    std::cout << "[RadixTree] Memory: " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB (" << (double)total_mem / NUM_KEYS << " bytes/key)" << std::endl;
+    size_t total_mem = ctx.nm16_4->get_mem_usage() + ctx.nm16_16->get_mem_usage() + ctx.nm256->get_mem_usage() + ctx.rm->get_mem_usage();
+    std::cout << "[ART] Memory: " << std::fixed << std::setprecision(2) << total_mem / (1024.0 * 1024.0) << " MB (" << (double)total_mem / NUM_KEYS << " bytes/key)" << std::endl;
 
     // --- std::unordered_map Benchmark ---
     std::unordered_map<std::string, u64> map;
@@ -328,20 +359,24 @@ void run_benchmark(int dimensionality, const std::string& key_type) {
 
     size_t key_size = dimensionality * sizeof(u64);
     size_t string_obj_size = sizeof(std::string);
-    size_t node_overhead = sizeof(void*) * 2; // Approximate overhead per node
+    size_t node_overhead = sizeof(void*) * 2;
     size_t map_mem = NUM_KEYS * (key_size + sizeof(u64) + string_obj_size + node_overhead);
     std::cout << "[std::unordered_map] Memory (est.): " << std::fixed << std::setprecision(2) << map_mem / (1024.0 * 1024.0) << " MB (" << (double)map_mem / NUM_KEYS << " bytes/key)" << std::endl;
 }
 
 int main() {
     try {
-        std::vector<int> dims_to_test = {1, 3, 4, 8};
-        std::vector<std::string> key_types_to_test = {"Random", "Sequential", "Clustered"};
+        std::vector<int> dims_to_test = {1, 8};
+        std::vector<std::string> key_types_to_test = {"Random", "Sequential"};
+        std::vector<size_t> node16_sizes_to_test = {4, 16};
 
         for (int dims : dims_to_test) {
             for (const auto& key_type : key_types_to_test) {
                 if (dims == 1 && key_type == "Clustered") continue;
-                run_benchmark(dims, key_type);
+                for (size_t n16_size : node16_sizes_to_test) {
+                    if (n16_size == 4) run_benchmark<4>(dims, key_type);
+                    else if (n16_size == 16) run_benchmark<16>(dims, key_type);
+                }
             }
         }
     } catch (const std::exception& e) {

@@ -145,9 +145,9 @@ class ART {
     const u32 dim_;
 
     static inline uint8_t get_key_fragment(const u64* key, int depth, u32 dim) {
-        if ((size_t)depth >= dim * sizeof(u64)) return 0;
         const u32 u64_idx = depth / sizeof(u64);
-        const u32 byte_shift = (depth % sizeof(u64)) * 8;
+        if (u64_idx >= dim) return 0;
+        const u32 byte_shift = (7 - (depth % sizeof(u64))) * 8;
         return (key[u64_idx] >> byte_shift) & 0xFF;
     }
 

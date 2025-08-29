@@ -1,0 +1,64 @@
+
+--- ART Benchmark (DIM=1, NODE16_SIZE=4, Random) ---
+[ART] Insertion: 828.70 ns/op
+[ART] Lookup: 102.32 ns/op (Found 2000000/2000000)
+[ART] Memory: 98.83 MB (51.82 bytes/key)
+[std::unordered_map] Insertion: 1498.25 ns/op
+[std::unordered_map] Lookup: 223.81 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 122.07 MB (64.00 bytes/key)
+
+--- ART Benchmark (DIM=1, NODE16_SIZE=16, Random) ---
+[ART] Insertion: 202.50 ns/op
+[ART] Lookup: 101.03 ns/op (Found 2000000/2000000)
+[ART] Memory: 108.60 MB (56.94 bytes/key)
+[std::unordered_map] Insertion: 630.32 ns/op
+[std::unordered_map] Lookup: 209.53 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 122.07 MB (64.00 bytes/key)
+
+--- ART Benchmark (DIM=1, NODE16_SIZE=4, Sequential) ---
+[ART] Insertion: 118.95 ns/op
+[ART] Lookup: 69.76 ns/op (Found 2000000/2000000)
+[ART] Memory: 96.28 MB (50.48 bytes/key)
+[std::unordered_map] Insertion: 592.70 ns/op
+[std::unordered_map] Lookup: 216.35 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 122.07 MB (64.00 bytes/key)
+
+--- ART Benchmark (DIM=1, NODE16_SIZE=16, Sequential) ---
+[ART] Insertion: 108.21 ns/op
+[ART] Lookup: 72.63 ns/op (Found 2000000/2000000)
+[ART] Memory: 100.04 MB (52.45 bytes/key)
+[std::unordered_map] Insertion: 617.36 ns/op
+[std::unordered_map] Lookup: 220.34 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 122.07 MB (64.00 bytes/key)
+
+--- ART Benchmark (DIM=8, NODE16_SIZE=4, Random) ---
+[ART] Insertion: 677.90 ns/op
+[ART] Lookup: 142.74 ns/op (Found 2000000/2000000)
+[ART] Memory: 205.71 MB (107.85 bytes/key)
+[std::unordered_map] Insertion: 2558.58 ns/op
+[std::unordered_map] Lookup: 599.35 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 228.88 MB (120.00 bytes/key)
+
+--- ART Benchmark (DIM=8, NODE16_SIZE=16, Random) ---
+[ART] Insertion: 297.33 ns/op
+[ART] Lookup: 123.76 ns/op (Found 2000000/2000000)
+[ART] Memory: 215.48 MB (112.97 bytes/key)
+[std::unordered_map] Insertion: 824.54 ns/op
+[std::unordered_map] Lookup: 581.42 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 228.88 MB (120.00 bytes/key)
+
+--- ART Benchmark (DIM=8, NODE16_SIZE=4, Sequential) ---
+[ART] Insertion: 182.97 ns/op
+[ART] Lookup: 86.29 ns/op (Found 2000000/2000000)
+[ART] Memory: 203.09 MB (106.48 bytes/key)
+[std::unordered_map] Insertion: 756.01 ns/op
+[std::unordered_map] Lookup: 560.17 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 228.88 MB (120.00 bytes/key)
+
+--- ART Benchmark (DIM=8, NODE16_SIZE=16, Sequential) ---
+[ART] Insertion: 155.89 ns/op
+[ART] Lookup: 77.43 ns/op (Found 2000000/2000000)
+[ART] Memory: 206.85 MB (108.45 bytes/key)
+[std::unordered_map] Insertion: 781.67 ns/op
+[std::unordered_map] Lookup: 566.10 ns/op (Found 2000000/2000000)
+[std::unordered_map] Memory (est.): 228.88 MB (120.00 bytes/key)

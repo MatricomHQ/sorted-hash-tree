@@ -99,7 +99,7 @@ class RecordManager {
     std::atomic<u32> next_record_idx_{1};
     uint8_t* record_pool_;
     const size_t record_size_with_coords_;
-    static constexpr u32 MAX_RECORDS = 32 * 1024 * 1024;
+    static constexpr u32 MAX_RECORDS = 2 * 1024 * 1024;
 public:
     RecordManager(u32 d) : record_size_with_coords_(Record::get_size(d)) {
         record_pool_ = (uint8_t*)mmap(nullptr, (size_t)MAX_RECORDS * record_size_with_coords_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -150,25 +150,29 @@ class HyperionTree {
     std::atomic<u32> root_ptr_{0};
     const u32 dim_;
 
-    static inline uint8_t get_key_fragment(const u64* key, int depth, u32 dim) {
-        const u32 current_dim = depth % dim;
-        const u32 byte_idx_in_dim = depth / dim;
-        if (byte_idx_in_dim >= sizeof(u64)) return 0;
-        const u32 byte_shift = (7 - (byte_idx_in_dim % sizeof(u64))) * 8;
-        return (key[current_dim] >> byte_shift) & 0xFF;
+    static inline uint8_t get_key_fragment(const u64* key, int depth, u32 dim, bool is_spatial) {
+        if (is_spatial) {
+            const u32 current_dim = depth % dim;
+            const u32 byte_idx_in_dim = depth / dim;
+            if (byte_idx_in_dim >= sizeof(u64)) return 0;
+            const u32 byte_shift = (7 - (byte_idx_in_dim % sizeof(u64))) * 8;
+            return (key[current_dim] >> byte_shift) & 0xFF;
+        } else {
+            const u32 u64_idx = depth / sizeof(u64);
+            if (u64_idx >= dim) return 0;
+            const u32 byte_shift = (7 - (depth % sizeof(u64))) * 8;
+            return (key[u64_idx] >> byte_shift) & 0xFF;
+        }
     }
 
-    void insert_recursive(const u64* key, u64 value, std::atomic<u32>* parent_slot, int depth) {
+    void insert_recursive(const u64* key, u64 rec_idx, std::atomic<u32>* parent_slot, int depth, bool is_spatial) {
         u32 leaf_ptr = 0;
 
         while(true) {
             u32 current_tagged_ptr = parent_slot->load(std::memory_order_acquire);
 
             if (current_tagged_ptr == 0) {
-                if (leaf_ptr == 0) {
-                    u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
-                    leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
-                }
+                if (leaf_ptr == 0) leaf_ptr = TaggedIndex::make_leaf_idx(rec_idx);
                 if(parent_slot->compare_exchange_strong(current_tagged_ptr, leaf_ptr, std::memory_order_release, std::memory_order_relaxed)) return;
                 else continue;
             }
@@ -186,20 +190,16 @@ class HyperionTree {
                 }
                 if (are_equal) return;
 
-                if (leaf_ptr == 0) {
-                    u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
-                    leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
-                }
-
                 u32 node16_idx = nm16_->allocate_node();
                 Node16Type* node = nm16_->get_node(node16_idx);
 
-                int existing_frag = get_key_fragment(existing_rec->coords, depth, dim_);
-                int new_frag = get_key_fragment(key, depth, dim_);
+                int existing_frag = get_key_fragment(existing_rec->coords, depth, dim_, is_spatial);
+                int new_frag = get_key_fragment(key, depth, dim_, is_spatial);
 
                 if (existing_frag != new_frag) {
                     node->keys[0] = std::min(existing_frag, new_frag);
                     node->keys[1] = std::max(existing_frag, new_frag);
+                    if (leaf_ptr == 0) leaf_ptr = TaggedIndex::make_leaf_idx(rec_idx);
                     node->children[0].store(existing_frag < new_frag ? current_tagged_ptr : leaf_ptr, std::memory_order_relaxed);
                     node->children[1].store(existing_frag < new_frag ? leaf_ptr : current_tagged_ptr, std::memory_order_relaxed);
                     node->count.store(2, std::memory_order_relaxed);
@@ -209,8 +209,8 @@ class HyperionTree {
                     node->keys[0] = new_frag;
                     node->count.store(1, std::memory_order_relaxed);
                     if(parent_slot->compare_exchange_strong(current_tagged_ptr, TaggedIndex::make_node16_idx(node16_idx), std::memory_order_release, std::memory_order_relaxed)) {
-                        insert_recursive(existing_rec->coords, existing_rec->value, &node->children[0], depth + 1);
-                        insert_recursive(key, value, &node->children[0], depth + 1);
+                        insert_recursive(existing_rec->coords, existing_rec_idx, &node->children[0], depth + 1, is_spatial);
+                        insert_recursive(key, rec_idx, &node->children[0], depth + 1, is_spatial);
                         return;
                     } else continue;
                 }
@@ -218,7 +218,7 @@ class HyperionTree {
 
             if (TaggedIndex::is_node16(current_tagged_ptr)) {
                 Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
-                uint8_t frag = get_key_fragment(key, depth, dim_);
+                uint8_t frag = get_key_fragment(key, depth, dim_, is_spatial);
                 int index = -1;
                 uint8_t count = node->count.load(std::memory_order_relaxed);
 
@@ -239,33 +239,20 @@ class HyperionTree {
                         #endif
                     }
                 } else {
-                    for(uint8_t i=0; i<count; ++i) {
-                        if(node->keys[i] == frag) {
-                            index = i;
-                            break;
-                        }
-                    }
+                    for(uint8_t i=0; i<count; ++i) { if(node->keys[i] == frag) { index = i; break; } }
                 }
                 #else
-                for(uint8_t i=0; i<count; ++i) {
-                    if(node->keys[i] == frag) {
-                        index = i;
-                        break;
-                    }
-                }
+                for(uint8_t i=0; i<count; ++i) { if(node->keys[i] == frag) { index = i; break; } }
                 #endif
 
                 if (index != -1) {
                     parent_slot = &node->children[index];
                     depth++;
-                    goto next_level;
+                    continue;
                 }
 
                 if (!node->is_full()) {
-                    if (leaf_ptr == 0) {
-                        u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
-                        leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
-                    }
+                    if (leaf_ptr == 0) leaf_ptr = TaggedIndex::make_leaf_idx(rec_idx);
                     uint8_t c = node->count.fetch_add(1, std::memory_order_relaxed);
                     node->keys[c] = frag;
                     node->children[c].store(leaf_ptr, std::memory_order_release);
@@ -276,10 +263,7 @@ class HyperionTree {
                     for(uint8_t i=0; i<count; ++i) {
                         new_node256->children[node->keys[i]].store(node->children[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
                     }
-                    if (leaf_ptr == 0) {
-                        u32 new_rec_idx = rm_.allocate_record(key, dim_, value);
-                        leaf_ptr = TaggedIndex::make_leaf_idx(new_rec_idx);
-                    }
+                    if (leaf_ptr == 0) leaf_ptr = TaggedIndex::make_leaf_idx(rec_idx);
                     new_node256->children[frag].store(leaf_ptr, std::memory_order_relaxed);
                     if(parent_slot->compare_exchange_strong(current_tagged_ptr, TaggedIndex::make_node256_idx(new_node256_idx), std::memory_order_release, std::memory_order_relaxed)) return;
                     else continue;
@@ -288,11 +272,10 @@ class HyperionTree {
 
             if (TaggedIndex::is_node256(current_tagged_ptr)) {
                 Node256* node = nm256_.get_node(TaggedIndex::get_index(current_tagged_ptr));
-                parent_slot = &node->children[get_key_fragment(key, depth, dim_)];
+                parent_slot = &node->children[get_key_fragment(key, depth, dim_, is_spatial)];
                 depth++;
                 continue;
             }
-            next_level:;
         }
     }
 
@@ -302,13 +285,12 @@ public:
         else if constexpr (NODE16_SIZE == 16) nm16_ = ctx.nm16_16.get();
     }
 
-    void insert(const u64* key, ValueType value) {
-        u64 val_u64 = 0;
-        memcpy(&val_u64, &value, sizeof(ValueType));
-        insert_recursive(key, val_u64, &root_ptr_, 0);
+    void insert(const u64* key, ValueType value, bool is_spatial) {
+        u32 rec_idx = rm_.allocate_record(key, dim_, value);
+        insert_recursive(key, rec_idx, &root_ptr_, 0, is_spatial);
     }
 
-    std::optional<ValueType> get(const u64* key) {
+    std::optional<ValueType> get(const u64* key, bool is_spatial) {
         int depth = 0;
         u32 current_tagged_ptr = root_ptr_.load(std::memory_order_acquire);
 
@@ -324,15 +306,11 @@ public:
                         break;
                     }
                 }
-                if (are_equal) {
-                    ValueType val;
-                    memcpy(&val, &rec->value, sizeof(ValueType));
-                    return val;
-                }
+                if (are_equal) return rec->value;
                 return std::nullopt;
             }
 
-            uint8_t frag = get_key_fragment(key, depth, dim_);
+            uint8_t frag = get_key_fragment(key, depth, dim_, is_spatial);
             if(TaggedIndex::is_node16(current_tagged_ptr)) {
                 Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
                 #if defined(__x86_64__) || defined(_M_X64)
@@ -379,16 +357,103 @@ public:
         return std::nullopt;
     }
 
-    void box_query(const Box& query_box, std::vector<ValueType>& results) {
-        box_query_recursive(root_ptr_.load(std::memory_order_acquire), query_box, 0, results);
+    void box_query(const Box& query_box, std::vector<ValueType>& results, bool is_spatial) {
+        box_query_recursive(root_ptr_.load(std::memory_order_acquire), query_box, 0, results, is_spatial);
+    }
+
+    void knn_query(const u64* point, int k, std::vector<ValueType>& results) {
+        results.clear();
+        u64 range = 1024;
+        std::vector<u32> rec_indices;
+
+        while(rec_indices.size() < (size_t)k) {
+            rec_indices.clear();
+            std::vector<u64> lower(dim_);
+            std::vector<u64> upper(dim_);
+            for(u32 d=0; d < dim_; ++d) {
+                lower[d] = (point[d] > range) ? point[d] - range : 0;
+                upper[d] = (point[d] < std::numeric_limits<u64>::max() - range) ? point[d] + range : std::numeric_limits<u64>::max();
+            }
+
+            Box query_box = {lower.data(), upper.data(), dim_};
+            box_query_for_knn(query_box, rec_indices);
+
+            if (range > std::numeric_limits<u64>::max() / 4) break;
+            range *= 2;
+        }
+
+        std::sort(rec_indices.begin(), rec_indices.end(), [&](const u32& a_idx, const u32& b_idx) {
+            Record* rec_a = rm_.get_record(a_idx);
+            Record* rec_b = rm_.get_record(b_idx);
+            return squared_dist(rec_a->coords, point) < squared_dist(rec_b->coords, point);
+        });
+
+        if (rec_indices.size() > (size_t)k) rec_indices.resize(k);
+
+        results.reserve(rec_indices.size());
+        for(u32 rec_idx : rec_indices) {
+            results.push_back(rm_.get_record(rec_idx)->value);
+        }
     }
 
 private:
-    void box_query_recursive(u32 current_tagged_ptr, const Box& query_box, int depth, std::vector<ValueType>& results) {
-        if (current_tagged_ptr == 0) {
+    unsigned __int128 squared_dist(const u64* p1, const u64* p2) {
+        unsigned __int128 total_dist = 0;
+        for (u32 i = 0; i < dim_; ++i) {
+            unsigned __int128 d = (p1[i] > p2[i]) ? (p1[i] - p2[i]) : (p2[i] - p1[i]);
+            total_dist += d * d;
+        }
+        return total_dist;
+    }
+
+    void box_query_for_knn(const Box& query_box, std::vector<u32>& rec_indices) {
+        box_query_knn_recursive(root_ptr_.load(std::memory_order_acquire), query_box, 0, rec_indices);
+    }
+
+    void box_query_knn_recursive(u32 current_tagged_ptr, const Box& query_box, int depth, std::vector<u32>& rec_indices) {
+        if (current_tagged_ptr == 0) return;
+        if (TaggedIndex::is_leaf(current_tagged_ptr)) {
+            u32 rec_idx = TaggedIndex::get_index(current_tagged_ptr);
+            Record* rec = rm_.get_record(rec_idx);
+            bool is_inside = true;
+            for (u32 i = 0; i < dim_; ++i) {
+                if (rec->coords[i] < query_box.lower_bounds[i] || rec->coords[i] > query_box.upper_bounds[i]) {
+                    is_inside = false;
+                    break;
+                }
+            }
+            if (is_inside) rec_indices.push_back(rec_idx);
             return;
         }
 
+        const u32 current_dim = depth % dim_;
+        const u32 byte_idx_in_dim = depth / dim_;
+        if (byte_idx_in_dim >= sizeof(u64)) return;
+        const u32 byte_shift = (7 - (byte_idx_in_dim % sizeof(u64))) * 8;
+        uint8_t start_frag = (query_box.lower_bounds[current_dim] >> byte_shift) & 0xFF;
+        uint8_t end_frag   = (query_box.upper_bounds[current_dim] >> byte_shift) & 0xFF;
+        if (TaggedIndex::is_node16(current_tagged_ptr)) {
+            Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
+            uint8_t count = node->count.load(std::memory_order_relaxed);
+            for (uint8_t i = 0; i < count; ++i) {
+                uint8_t frag = node->keys[i];
+                if (frag >= start_frag && frag <= end_frag) {
+                    box_query_knn_recursive(node->children[i].load(std::memory_order_acquire), query_box, depth + 1, rec_indices);
+                }
+            }
+        } else if (TaggedIndex::is_node256(current_tagged_ptr)) {
+            Node256* node = nm256_.get_node(TaggedIndex::get_index(current_tagged_ptr));
+            for (int i = start_frag; i <= end_frag; ++i) {
+                u32 child_ptr = node->children[i].load(std::memory_order_acquire);
+                if (child_ptr != 0) {
+                    box_query_knn_recursive(child_ptr, query_box, depth + 1, rec_indices);
+                }
+            }
+        }
+    }
+
+    void box_query_recursive(u32 current_tagged_ptr, const Box& query_box, int depth, std::vector<ValueType>& results, bool is_spatial) {
+        if (current_tagged_ptr == 0) return;
         if (TaggedIndex::is_leaf(current_tagged_ptr)) {
             Record* rec = rm_.get_record(TaggedIndex::get_index(current_tagged_ptr));
             bool is_inside = true;
@@ -398,39 +463,35 @@ private:
                     break;
                 }
             }
-            if (is_inside) {
-                ValueType val;
-                memcpy(&val, &rec->value, sizeof(ValueType));
-                results.push_back(val);
-            }
+            if (is_inside) results.push_back(rec->value);
             return;
         }
-
-        const u32 current_dim = depth % dim_;
-        const u32 byte_idx_in_dim = depth / dim_;
-
-        if (byte_idx_in_dim >= sizeof(u64)) {
-            return;
-        }
-
-        const u32 byte_shift = (7 - (byte_idx_in_dim % sizeof(u64))) * 8;
-        u64 prefix_mask = (byte_shift == 56) ? 0 : (((u64)-1) << (byte_shift + 8));
-
         uint8_t start_frag = 0;
         uint8_t end_frag = 255;
-
-        if ((query_box.lower_bounds[current_dim] & prefix_mask) == (query_box.upper_bounds[current_dim] & prefix_mask)) {
+        if (is_spatial) {
+            const u32 current_dim = depth % dim_;
+            const u32 byte_idx_in_dim = depth / dim_;
+            if (byte_idx_in_dim >= sizeof(u64)) return;
+            const u32 byte_shift = (7 - (byte_idx_in_dim % sizeof(u64))) * 8;
             start_frag = (query_box.lower_bounds[current_dim] >> byte_shift) & 0xFF;
-            end_frag = (query_box.upper_bounds[current_dim] >> byte_shift) & 0xFF;
+            end_frag   = (query_box.upper_bounds[current_dim] >> byte_shift) & 0xFF;
+        } else {
+            const u32 u64_idx = depth / sizeof(u64);
+            if (u64_idx >= dim_) return;
+            const u32 byte_shift = (7 - (depth % sizeof(u64))) * 8;
+            u64 prefix_mask = (byte_shift == 56) ? 0 : (((u64)-1) << (byte_shift + 8));
+            if ((query_box.lower_bounds[u64_idx] & prefix_mask) == (query_box.upper_bounds[u64_idx] & prefix_mask)) {
+                start_frag = (query_box.lower_bounds[u64_idx] >> byte_shift) & 0xFF;
+                end_frag = (query_box.upper_bounds[u64_idx] >> byte_shift) & 0xFF;
+            }
         }
-
         if (TaggedIndex::is_node16(current_tagged_ptr)) {
             Node16Type* node = nm16_->get_node(TaggedIndex::get_index(current_tagged_ptr));
             uint8_t count = node->count.load(std::memory_order_relaxed);
             for (uint8_t i = 0; i < count; ++i) {
                 uint8_t frag = node->keys[i];
                 if (frag >= start_frag && frag <= end_frag) {
-                    box_query_recursive(node->children[i].load(std::memory_order_acquire), query_box, depth + 1, results);
+                    box_query_recursive(node->children[i].load(std::memory_order_acquire), query_box, depth + 1, results, is_spatial);
                 }
             }
         } else if (TaggedIndex::is_node256(current_tagged_ptr)) {
@@ -438,7 +499,7 @@ private:
             for (int i = start_frag; i <= end_frag; ++i) {
                 u32 child_ptr = node->children[i].load(std::memory_order_acquire);
                 if (child_ptr != 0) {
-                    box_query_recursive(child_ptr, query_box, depth + 1, results);
+                    box_query_recursive(child_ptr, query_box, depth + 1, results, is_spatial);
                 }
             }
         }
@@ -466,14 +527,13 @@ void print_query_stats(const std::string& name, size_t items, long long latency_
               << std::right << std::setw(15) << std::fixed << std::setprecision(2) << ops_sec << std::endl;
 }
 
-
-// --- Benchmark Suite ---
+// --- Spatial Benchmark Suite ---
 template<size_t NODE16_SIZE>
-void run_hyperion_benchmarks(u32 dim, size_t num_keys) {
+void run_spatial_benchmarks(u32 dim, size_t num_keys) {
     using TreeType = HyperionTree<NODE16_SIZE, u64>;
     using ValueType = u64;
 
-    std::cout << "\n--- Hyperion Benchmark (DIM=" << dim << ", NODE16_SIZE=" << NODE16_SIZE << ", N=" << num_keys << ") ---\n" << std::endl;
+    std::cout << "\n--- Hyperion Spatial Benchmark (DIM=" << dim << ", NODE16_SIZE=" << NODE16_SIZE << ", N=" << num_keys << ") ---\n" << std::endl;
 
     MemoryContext ctx(dim);
     TreeType tree(ctx, dim);
@@ -490,295 +550,165 @@ void run_hyperion_benchmarks(u32 dim, size_t num_keys) {
 
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < num_keys; ++i) {
-        tree.insert(keys[i].data(), i);
+        tree.insert(keys[i].data(), i, true);
     }
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     std::cout << "Total Insertion Time: " << duration.count() / 1e6 << " ms (" << (double)duration.count() / num_keys << " ns/op)\n" << std::endl;
 
-    // --- Query Performance ---
     print_header();
     std::vector<ValueType> results;
     results.reserve(num_keys);
 
-    const u64 MAX_COORD = std::numeric_limits<u64>::max();
-    const int ITERS = 20; // Reduced iterations for faster benchmark run
-    const size_t MIN_ITEMS = 1000;
+    // k-NN Benchmark
+    for (int k : {1, 10, 100}) {
+        long long total_latency = 0;
+        const int ITERS = 100;
+        for (int i = 0; i < ITERS; ++i) {
+            std::vector<u64> query_point = keys[(num_keys / 2 + i * 11) % num_keys];
+            auto s = std::chrono::high_resolution_clock::now();
+            tree.knn_query(query_point.data(), k, results);
+            auto e = std::chrono::high_resolution_clock::now();
+            total_latency += std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count();
+        }
+        std::string bench_name = "k-NN (k=" + std::to_string(k) + ")";
+        print_query_stats(bench_name, k, total_latency / ITERS);
+    }
+}
 
+
+// --- KV Benchmark Suite ---
+template<size_t NODE16_SIZE>
+void run_kv_benchmarks() {
+    const u32 dim = 32; // 256-byte keys
+    const size_t num_keys = 500000;
+    using TreeType = HyperionTree<NODE16_SIZE, u64>;
+    using ValueType = u64;
+
+    std::cout << "\n--- Hyperion KV Benchmark (KEY_SIZE=256B, NODE16_SIZE=" << NODE16_SIZE << ", N=" << num_keys << ") ---\n" << std::endl;
+
+    MemoryContext ctx(dim);
+    TreeType tree(ctx, dim);
+
+    std::vector<std::vector<u64>> keys(num_keys, std::vector<u64>(dim));
+    std::mt19937_64 rng(12345);
+    std::uniform_int_distribution<u64> dist(0, std::numeric_limits<u64>::max());
+
+    for (auto& key : keys) {
+        for (u32 d = 0; d < dim; ++d) {
+            key[d] = dist(rng);
+        }
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < num_keys; ++i) {
+        tree.insert(keys[i].data(), i, false);
+    }
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+    std::cout << "Total Insertion Time: " << duration.count() / 1e6 << " ms (" << (double)duration.count() / num_keys << " ns/op)\n" << std::endl;
+
+    print_header();
+    std::vector<ValueType> results;
+    results.reserve(num_keys);
 
     // Point Query
     {
         long long total_latency = 0;
-        size_t total_items = 0;
         const int POINT_ITERS = 1000;
         for (int i = 0; i < POINT_ITERS; ++i) {
-            results.clear();
             std::vector<u64> query_key = keys[(num_keys / 2 + i * 7) % num_keys];
-            Box query_box = {query_key.data(), query_key.data(), dim};
             auto s = std::chrono::high_resolution_clock::now();
-            tree.box_query(query_box, results);
+            tree.get(query_key.data(), false);
+            auto e = std::chrono::high_resolution_clock::now();
+            total_latency += std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count();
+        }
+        print_query_stats("Point Query", 1, total_latency / POINT_ITERS);
+    }
+
+    // Prefix Scan Benchmarks
+    for (int prefix_bytes : {8, 16, 32}) {
+        long long total_latency = 0;
+        size_t total_items = 0;
+        const int ITERS = 50;
+        int prefix_dims = prefix_bytes / 8;
+
+        for (int i = 0; i < ITERS; ++i) {
+            results.clear();
+            std::vector<u64> lower(dim, 0);
+            std::vector<u64> upper(dim, std::numeric_limits<u64>::max());
+
+            for(int d=0; d < prefix_dims; ++d) {
+                lower[d] = upper[d] = keys[(num_keys / 2 + i * 13) % num_keys][d];
+            }
+
+            Box query_box = {lower.data(), upper.data(), dim};
+            auto s = std::chrono::high_resolution_clock::now();
+            tree.box_query(query_box, results, false);
             auto e = std::chrono::high_resolution_clock::now();
             total_latency += std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count();
             total_items += results.size();
         }
-        print_query_stats("Point Query", total_items / POINT_ITERS, total_latency / POINT_ITERS);
-    }
-
-    // Narrow Box Query (adaptive)
-    {
-        long long total_latency = 0;
-        size_t total_items = 0;
-        for (int i = 0; i < ITERS; ++i) {
-            u64 range = 1024; // Start small
-            size_t items_found = 0;
-            std::chrono::nanoseconds latency(0);
-
-            while(items_found < MIN_ITEMS) {
-                results.clear();
-                std::vector<u64> lower = keys[(num_keys / 2 + i * 7) % num_keys];
-                std::vector<u64> upper = lower;
-                for(u32 d=0; d<dim; ++d) upper[d] = (lower[d] > MAX_COORD - range) ? MAX_COORD : lower[d] + range;
-                Box query_box = {lower.data(), upper.data(), dim};
-
-                auto s = std::chrono::high_resolution_clock::now();
-                tree.box_query(query_box, results);
-                auto e = std::chrono::high_resolution_clock::now();
-                latency = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s);
-
-                items_found = results.size();
-                if (range > MAX_COORD / 2) { if (items_found == 0) items_found = 1; break; }
-                if (items_found < MIN_ITEMS) range *= 2;
-            }
-            total_latency += latency.count();
-            total_items += items_found;
-        }
-        print_query_stats("Narrow Box Query", total_items / ITERS, total_latency / ITERS);
-    }
-
-    // Elongated Box Query (adaptive)
-    {
-        long long total_latency = 0;
-        size_t total_items = 0;
-        for (int i = 0; i < ITERS; ++i) {
-            u64 long_range = 1024;
-            size_t items_found = 0;
-            std::chrono::nanoseconds latency(0);
-
-            while(items_found < MIN_ITEMS) {
-                results.clear();
-                u64 short_range = long_range / 100;
-                if (short_range == 0) short_range = 1;
-                std::vector<u64> lower = keys[(num_keys / 3 + i * 7) % num_keys];
-                std::vector<u64> upper = lower;
-                upper[0] = (lower[0] > MAX_COORD - long_range) ? MAX_COORD : lower[0] + long_range;
-                for(u32 d=1; d<dim; ++d) upper[d] = (lower[d] > MAX_COORD - short_range) ? MAX_COORD : lower[d] + short_range;
-                Box query_box = {lower.data(), upper.data(), dim};
-
-                auto s = std::chrono::high_resolution_clock::now();
-                tree.box_query(query_box, results);
-                auto e = std::chrono::high_resolution_clock::now();
-                latency = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s);
-
-                items_found = results.size();
-                if (long_range > MAX_COORD / 2) { if (items_found == 0) items_found = 1; break; }
-                if (items_found < MIN_ITEMS) {
-                    long_range *= 2;
-                }
-            }
-            total_latency += latency.count();
-            total_items += items_found;
-        }
-        print_query_stats("Elongated Box", total_items / ITERS, total_latency / ITERS);
-    }
-
-    // Full Axis Scan (adaptive)
-    if (dim > 1) {
-        long long total_latency = 0;
-        size_t total_items = 0;
-        for (int i = 0; i < ITERS; ++i) {
-            u64 range = 0; // Start with a perfect slice
-            size_t items_found = 0;
-            std::chrono::nanoseconds latency(0);
-
-            while(items_found < MIN_ITEMS) {
-                results.clear();
-                std::vector<u64> lower(dim, 0);
-                std::vector<u64> upper(dim, MAX_COORD);
-                u64 center = keys[(num_keys/4 + i * 7) % num_keys][0];
-                lower[0] = (center > range) ? center - range : 0;
-                upper[0] = (center < MAX_COORD - range) ? center + range : MAX_COORD;
-                Box query_box = {lower.data(), upper.data(), dim};
-
-                auto s = std::chrono::high_resolution_clock::now();
-                tree.box_query(query_box, results);
-                auto e = std::chrono::high_resolution_clock::now();
-                latency = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s);
-
-                items_found = results.size();
-                if (range > MAX_COORD / 4) { if (items_found == 0) items_found = 1; break; }
-                if (items_found < MIN_ITEMS) range = (range == 0) ? 1 : range * 2;
-            }
-            total_latency += latency.count();
-            total_items += items_found;
-        }
-        print_query_stats("Full Axis Scan", total_items / ITERS, total_latency / ITERS);
-    }
-
-    // Partial Axis Scan (adaptive)
-    if (dim > 1) {
-        long long total_latency = 0;
-        size_t total_items = 0;
-        for (int i = 0; i < ITERS; ++i) {
-            u64 range = 1024;
-            size_t items_found = 0;
-            std::chrono::nanoseconds latency(0);
-
-            while(items_found < MIN_ITEMS) {
-                results.clear();
-                std::vector<u64> lower(dim, 0);
-                std::vector<u64> upper(dim, MAX_COORD);
-                lower[0] = keys[(num_keys/5 + i * 7) % num_keys][0];
-                upper[0] = lower[0] > MAX_COORD - range ? MAX_COORD : lower[0] + range;
-                Box query_box = {lower.data(), upper.data(), dim};
-
-                auto s = std::chrono::high_resolution_clock::now();
-                tree.box_query(query_box, results);
-                auto e = std::chrono::high_resolution_clock::now();
-                latency = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s);
-
-                items_found = results.size();
-                if (range > MAX_COORD / 2) { if (items_found == 0) items_found = 1; break; }
-                if (items_found < MIN_ITEMS) range *= 2;
-            }
-
-            total_latency += latency.count();
-            total_items += items_found;
-        }
-        print_query_stats("Partial Axis Scan", total_items / ITERS, total_latency / ITERS);
-    }
-
-    // Cross-Axis Scan (adaptive)
-    if (dim > 2) {
-        long long total_latency = 0;
-        size_t total_items = 0;
-        for (int i = 0; i < ITERS; ++i) {
-            u64 range = 0;
-            size_t items_found = 0;
-            std::chrono::nanoseconds latency(0);
-
-            while(items_found < MIN_ITEMS) {
-                results.clear();
-                std::vector<u64> lower(dim, 0);
-                std::vector<u64> upper(dim, MAX_COORD);
-                u64 center0 = keys[(num_keys/6 + i * 7) % num_keys][0];
-                u64 center1 = keys[(num_keys/6 + i * 7) % num_keys][1];
-                lower[0] = (center0 > range) ? center0 - range : 0;
-                upper[0] = (center0 < MAX_COORD - range) ? center0 + range : MAX_COORD;
-                lower[1] = (center1 > range) ? center1 - range : 0;
-                upper[1] = (center1 < MAX_COORD - range) ? center1 + range : MAX_COORD;
-                Box query_box = {lower.data(), upper.data(), dim};
-
-                auto s = std::chrono::high_resolution_clock::now();
-                tree.box_query(query_box, results);
-                auto e = std::chrono::high_resolution_clock::now();
-                latency = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s);
-
-                items_found = results.size();
-                if (range > MAX_COORD / 4) { if (items_found == 0) items_found = 1; break; }
-                if (items_found < MIN_ITEMS) range = (range == 0) ? 1 : range * 2;
-            }
-            total_latency += latency.count();
-            total_items += items_found;
-        }
-        print_query_stats("Cross-Axis Scan", total_items / ITERS, total_latency / ITERS);
-    }
-
-    // Diagonal Sliver (adaptive)
-    {
-        long long total_latency = 0;
-        size_t total_items = 0;
-        for (int i = 0; i < ITERS; ++i) {
-            u64 range = 1;
-            size_t items_found = 0;
-            std::chrono::nanoseconds latency(0);
-
-            while(items_found < MIN_ITEMS) {
-                results.clear();
-                std::vector<u64> lower(dim);
-                std::vector<u64> upper(dim);
-                u64 center = keys[(num_keys/7 + i*7) % num_keys][0];
-                for(u32 d=0; d<dim; ++d) {
-                    lower[d] = (center > range) ? center - range : 0;
-                    upper[d] = (center < MAX_COORD - range) ? center + range : MAX_COORD;
-                }
-                Box query_box = {lower.data(), upper.data(), dim};
-
-                auto s = std::chrono::high_resolution_clock::now();
-                tree.box_query(query_box, results);
-                auto e = std::chrono::high_resolution_clock::now();
-                latency = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s);
-
-                items_found = results.size();
-                if (range > MAX_COORD / 4) { if (items_found == 0) items_found = 1; break; }
-                if (items_found < MIN_ITEMS) range *= 2;
-            }
-            total_latency += latency.count();
-            total_items += items_found;
-        }
-        print_query_stats("Diagonal Sliver", total_items / ITERS, total_latency / ITERS);
-    }
-
-    // High-Bit Query (no change needed, already finds many items)
-    {
-        results.clear();
-        std::vector<u64> lower(dim, 0);
-        std::vector<u64> upper(dim, MAX_COORD);
-        lower[0] = 1ULL << 63;
-        Box query_box = {lower.data(), upper.data(), dim};
-        auto s = std::chrono::high_resolution_clock::now();
-        tree.box_query(query_box, results);
-        auto e = std::chrono::high_resolution_clock::now();
-        print_query_stats("High-Bit Query", results.size(), std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count());
-    }
-
-    // Checkerboard Query (no change needed, already finds many items)
-    {
-        long long total_latency = 0;
-        size_t total_items = 0;
-        const int C_ITERS = 10; // 10x10x... checkerboard
-        u64 range = MAX_COORD / (C_ITERS * 2);
-
-        auto s = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < C_ITERS; ++i) {
-            for (int j = 0; j < C_ITERS; ++j) {
-                if ((i+j) % 2 == 0) {
-                    std::vector<ValueType> temp_results;
-                    std::vector<u64> lower(dim, 0);
-                    std::vector<u64> upper(dim, 0);
-                    lower[0] = i * 2 * range;
-                    upper[0] = lower[0] + range;
-                    if (dim > 1) {
-                        lower[1] = j * 2 * range;
-                        upper[1] = lower[1] + range;
-                    }
-                    for(u32 d=2; d<dim; ++d) {
-                        upper[d] = MAX_COORD;
-                    }
-                    Box query_box = {lower.data(), upper.data(), dim};
-                    tree.box_query(query_box, temp_results);
-                    total_items += temp_results.size();
-                }
-            }
-        }
-        auto e = std::chrono::high_resolution_clock::now();
-        total_latency = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count();
-        print_query_stats("Checkerboard Query", total_items, total_latency);
+        std::string bench_name = "Prefix Scan (" + std::to_string(prefix_bytes) + "B)";
+        print_query_stats(bench_name, total_items / ITERS, total_latency / ITERS);
     }
 }
 
+template<size_t NODE16_SIZE>
+void run_original_benchmark(int dimensionality, const std::string& key_type) {
+    const size_t NUM_KEYS = 1000000;
+    std::cout << "\n--- Original Benchmark (DIM=" << dimensionality << ", NODE16_SIZE=" << NODE16_SIZE << ", " << key_type << ") ---" << std::endl;
+
+    using TreeType = HyperionTree<NODE16_SIZE, u64>;
+
+    MemoryContext ctx(dimensionality);
+    TreeType tree(ctx, dimensionality);
+
+    std::vector<std::vector<u64>> keys(NUM_KEYS, std::vector<u64>(dimensionality));
+    std::mt19937_64 rng(12345);
+
+    if (key_type == "Random") for (auto& key : keys) for(int d=0; d<dimensionality; ++d) key[d] = rng();
+    else if (key_type == "Sequential") for (size_t i=0; i<NUM_KEYS; ++i) for(int d=0; d<dimensionality; ++d) keys[i][d] = i;
+
+    auto start = std::chrono::high_resolution_clock::now();
+    for (size_t i = 0; i < NUM_KEYS; ++i) tree.insert(keys[i].data(), i, false);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+    std::cout << "[HyperionTree] Insertion: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
+
+    size_t found_count = 0;
+    start = std::chrono::high_resolution_clock::now();
+    for (const auto& key : keys) if(tree.get(key.data(), false)) found_count++;
+    end = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+    std::cout << "[HyperionTree] Lookup: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << " (Found " << found_count << "/" << NUM_KEYS << ")" << std::endl;
+
+    // --- std::unordered_map Benchmark ---
+    std::unordered_map<std::string, u64> map;
+    start = std::chrono::high_resolution_clock::now();
+    for (size_t i=0; i<NUM_KEYS; ++i) {
+        map[std::string((char*)keys[i].data(), dimensionality * sizeof(u64))] = i;
+    }
+    end = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+    std::cout << "[std::unordered_map] Insertion: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << std::endl;
+
+    found_count = 0;
+    start = std::chrono::high_resolution_clock::now();
+    for (const auto& key : keys) {
+        if (map.count(std::string((char*)key.data(), dimensionality * sizeof(u64)))) found_count++;
+    }
+    end = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+    std::cout << "[std::unordered_map] Lookup: " << std::fixed << std::setprecision(2) << (double)duration.count() / NUM_KEYS << " ns/op" << " (Found " << found_count << "/" << NUM_KEYS << ")" << std::endl;
+}
+
+
 int main() {
     try {
-        run_hyperion_benchmarks<4>(3, 1000000);
+        run_original_benchmark<4>(8, "Random"); // 8*8 = 64 byte keys
+        run_spatial_benchmarks<4>(3, 500000);
+        run_kv_benchmarks<4>();
     } catch (const std::exception& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;
         return 1;
